@@ -1132,3 +1132,7 @@ export async function fetchTeamMemberActivities(token, org, members, onProgress)
     memberStats: allStats.sort((a, b) => b.total - a.total),
   }
 }
+
+// ============ RE-EXPORTS FROM MODULAR FILES ============
+export * from './github/teams'
+export * from './github/activities'
