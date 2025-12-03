@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Search, Calendar, Filter, RefreshCw, GitCommit, GitPullRequest, Layers, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, Calendar, Filter, RefreshCw, GitCommit, GitPullRequest, Layers, Zap, Trash2 } from 'lucide-react'
+import { clearCache } from '../api/github'
 
 export function Sidebar({
   isOpen,
@@ -55,9 +56,12 @@ export function Sidebar({
     onSearchChange('')
   }
 
+  const handleForceRefresh = () => {
+    clearCache()
+    onRefresh()
+  }
+
   const hasActiveFilters = selectedRepos.length > 0 || dateRange.from || dateRange.to || activityType !== 'all' || searchQuery
-  
-  const displayRepos = showAllRepos ? allRepos : repos
 
   return (
     <aside 
@@ -163,7 +167,7 @@ export function Sidebar({
                   : 'bg-void-700/30 text-frost-300/60 border border-void-600/50 hover:bg-void-700/50'
               }`}
             >
-              With Activity ({repos.length})
+              Active ({repos.length})
             </button>
             <button
               onClick={() => setShowAllRepos(true)}
@@ -173,7 +177,7 @@ export function Sidebar({
                   : 'bg-void-700/30 text-frost-300/60 border border-void-600/50 hover:bg-void-700/50'
               }`}
             >
-              All Repos ({allRepos.length})
+              All ({allRepos.length})
             </button>
           </div>
 
@@ -247,17 +251,19 @@ export function Sidebar({
           <button
             onClick={onRefresh}
             disabled={loading}
-            className="w-full flex flex-col items-center justify-center gap-1 px-4 py-2.5 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed glow-blue"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed glow-blue"
           >
-            <div className="flex items-center gap-2">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading ? 'Fetching...' : 'Refresh Data'}
-            </div>
-            {loading && progress && (
-              <span className="text-xs opacity-80">
-                {progress.processed}/{progress.total} repos ({progress.percentage}%)
-              </span>
-            )}
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+          
+          <button
+            onClick={handleForceRefresh}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-void-700/30 hover:bg-void-700/50 border border-void-600/50 rounded-xl text-frost-300/60 hover:text-frost-200 text-xs transition-all disabled:opacity-50"
+          >
+            <Trash2 className="w-3 h-3" />
+            Clear Cache & Refresh
           </button>
         </div>
       </div>
