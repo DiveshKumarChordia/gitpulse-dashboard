@@ -40,6 +40,7 @@ async function fetchWithAuth(url, token) {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'GitPulse-Dashboard',
     },
   })
   
@@ -60,6 +61,7 @@ async function graphqlQuery(token, query, variables = {}) {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'User-Agent': 'GitPulse-Dashboard',
     },
     body: JSON.stringify({ query, variables }),
   })
@@ -104,7 +106,6 @@ async function fetchReposGraphQL(token, org, cursor = null) {
 
 // ============ REPOSITORY STRUCTURE ============
 
-// Fetch all branches for a repository
 export async function fetchBranches(token, owner, repo) {
   const branches = []
   let page = 1
@@ -132,10 +133,8 @@ export async function fetchBranches(token, owner, repo) {
   return branches
 }
 
-// Fetch repository tree (file structure)
 export async function fetchRepoTree(token, owner, repo, branch = 'main') {
   try {
-    // First get the branch ref to get the tree SHA
     const branchData = await fetchWithAuth(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`,
       token
@@ -143,13 +142,11 @@ export async function fetchRepoTree(token, owner, repo, branch = 'main') {
     
     const treeSha = branchData.commit.commit.tree.sha
     
-    // Fetch the entire tree recursively
     const treeData = await fetchWithAuth(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
       token
     )
     
-    // Convert flat list to hierarchical structure
     return buildFileTree(treeData.tree)
   } catch (e) {
     console.error('Error fetching repo tree:', e)
@@ -157,7 +154,6 @@ export async function fetchRepoTree(token, owner, repo, branch = 'main') {
   }
 }
 
-// Build hierarchical file tree from flat list
 function buildFileTree(items) {
   const root = { name: '', path: '', type: 'tree', children: [] }
   
@@ -188,7 +184,6 @@ function buildFileTree(items) {
     }
   }
   
-  // Sort: folders first, then files, alphabetically
   const sortTree = (node) => {
     if (node.children) {
       node.children.sort((a, b) => {
@@ -219,6 +214,7 @@ async function fetchUserCommitsSearch(token, org, username) {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github.cloak-preview+json',
+          'User-Agent': 'GitPulse-Dashboard',
         },
       })
       
@@ -253,6 +249,7 @@ async function fetchUserPRsSearch(token, org, username) {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'GitPulse-Dashboard',
         },
       })
       
@@ -274,22 +271,26 @@ async function fetchUserPRsSearch(token, org, username) {
 
 // ============ CODE SEARCH ============
 export async function searchCode(token, query, org, repo, options = {}) {
-  const { branches = [], paths = [], language, extension } = options
+  const { paths = [], language, extension } = options
   
-  // Build search query
-  let searchQuery = query
+  // Build search query - start with the search term
+  let searchQuery = query.trim()
   
-  // Add repo filter (single repo search)
-  if (repo) {
+  // Add repo filter
+  if (repo && org) {
     searchQuery += ` repo:${org}/${repo}`
   } else if (org) {
     searchQuery += ` org:${org}`
   }
   
-  // Add path filters
+  // Add path filter - only use top-level folder paths to avoid query length issues
+  // GitHub code search works best with simple path prefixes
   if (paths.length > 0) {
-    for (const path of paths.slice(0, 5)) { // Limit to avoid query too long
-      searchQuery += ` path:${path}`
+    // Get unique top-level folders/files (limit to 3 to avoid query length issues)
+    const topPaths = [...new Set(paths.map(p => p.split('/')[0]))].slice(0, 3)
+    if (topPaths.length > 0 && topPaths.length <= 3) {
+      // Use path: for folder filtering
+      searchQuery += ` path:${topPaths[0]}`
     }
   }
   
@@ -303,53 +304,58 @@ export async function searchCode(token, query, org, repo, options = {}) {
     searchQuery += ` extension:${extension}`
   }
   
-  const url = `${GITHUB_API_BASE}/search/code?q=${encodeURIComponent(searchQuery)}&per_page=100`
+  console.log('Code search query:', searchQuery)
+  
+  const url = `${GITHUB_API_BASE}/search/code?q=${encodeURIComponent(searchQuery)}&per_page=50`
   
   try {
     const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/vnd.github.v3.text-match+json',
+        'User-Agent': 'GitPulse-Dashboard',
       },
     })
     
     if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('Code search failed:', response.status, errorData)
+      
       if (response.status === 403) {
-        throw new Error('Rate limit exceeded. Please wait a moment.')
+        throw new Error('Rate limit exceeded. Please wait a moment and try again.')
       }
       if (response.status === 422) {
-        throw new Error('Search query too complex. Try simpler terms.')
+        throw new Error('Search query too complex. Try simpler terms or fewer filters.')
       }
       throw new Error(`Search failed: ${response.statusText}`)
     }
     
     const data = await response.json()
     
-    // Filter by branches if specified
-    let items = data.items.map(item => ({
-      name: item.name,
-      path: item.path,
-      sha: item.sha,
-      url: item.html_url,
-      repository: {
-        name: item.repository.name,
-        fullName: item.repository.full_name,
-        url: item.repository.html_url,
-        private: item.repository.private,
-      },
-      textMatches: item.text_matches?.map(match => ({
-        fragment: match.fragment,
-        matches: match.matches?.map(m => ({
-          text: m.text,
-          indices: m.indices,
-        })),
-      })) || [],
-    }))
+    console.log('Code search results:', data.total_count, 'items')
     
     return {
       totalCount: data.total_count,
       incompleteResults: data.incomplete_results,
-      items,
+      items: (data.items || []).map(item => ({
+        name: item.name,
+        path: item.path,
+        sha: item.sha,
+        url: item.html_url,
+        repository: {
+          name: item.repository.name,
+          fullName: item.repository.full_name,
+          url: item.repository.html_url,
+          private: item.repository.private,
+        },
+        textMatches: item.text_matches?.map(match => ({
+          fragment: match.fragment,
+          matches: match.matches?.map(m => ({
+            text: m.text,
+            indices: m.indices,
+          })),
+        })) || [],
+      })),
     }
   } catch (error) {
     console.error('Code search error:', error)
@@ -357,63 +363,16 @@ export async function searchCode(token, query, org, repo, options = {}) {
   }
 }
 
-// Search in specific files/branches using contents API
-export async function searchInFiles(token, owner, repo, branch, paths, query) {
-  const results = []
-  
-  for (const path of paths) {
-    try {
-      const response = await fetch(
-        `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3.raw',
-          },
-        }
-      )
-      
-      if (!response.ok) continue
-      
-      const content = await response.text()
-      const lines = content.split('\n')
-      const matches = []
-      
-      const queryLower = query.toLowerCase()
-      lines.forEach((line, index) => {
-        if (line.toLowerCase().includes(queryLower)) {
-          matches.push({
-            lineNumber: index + 1,
-            line: line,
-            preview: lines.slice(Math.max(0, index - 2), index + 3).join('\n'),
-          })
-        }
-      })
-      
-      if (matches.length > 0) {
-        results.push({
-          path,
-          matches,
-          url: `https://github.com/${owner}/${repo}/blob/${branch}/${path}`,
-        })
-      }
-    } catch (e) {
-      console.warn(`Error searching file ${path}:`, e)
-    }
-  }
-  
-  return results
-}
-
 // Get file content
 export async function getFileContent(token, owner, repo, path, branch = 'main') {
   try {
     const response = await fetch(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github.v3.raw',
+          'User-Agent': 'GitPulse-Dashboard',
         },
       }
     )

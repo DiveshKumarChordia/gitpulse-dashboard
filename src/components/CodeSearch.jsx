@@ -437,31 +437,46 @@ export function CodeSearch({ token, org, allRepos }) {
     
     setLoading(true)
     setError(null)
+    setResults(null)
     
     try {
       const allResults = []
+      const errors = []
       
       for (const repo of selectedRepos) {
         const repoBranches = Array.from(selectedBranchesMap[repo.name] || [])
-        const repoPaths = Array.from(selectedPathsMap[repo.name] || [])
+        const repoPaths = Array.from(selectedPathsMap[repo.name] || new Set())
         
-        const searchResults = await searchCode(token, query, org, repo.name, {
-          branches: repoBranches,
-          paths: repoPaths.length > 0 ? repoPaths : [],
-          language: language || undefined,
-          extension: extension || undefined,
-        })
-        
-        searchResults.items.forEach(item => {
-          item.searchedBranches = repoBranches
-        })
-        
-        allResults.push(...searchResults.items)
+        try {
+          const searchResults = await searchCode(token, query, org, repo.name, {
+            branches: repoBranches,
+            paths: repoPaths,
+            language: language || undefined,
+            extension: extension || undefined,
+          })
+          
+          if (searchResults && searchResults.items) {
+            searchResults.items.forEach(item => {
+              item.searchedBranches = repoBranches
+            })
+            allResults.push(...searchResults.items)
+          }
+        } catch (repoError) {
+          console.error(`Search failed for ${repo.name}:`, repoError)
+          errors.push(`${repo.name}: ${repoError.message}`)
+        }
       }
       
-      setResults({ totalCount: allResults.length, items: allResults, incompleteResults: false })
+      if (allResults.length > 0 || errors.length === 0) {
+        setResults({ totalCount: allResults.length, items: allResults, incompleteResults: false })
+      }
+      
+      if (errors.length > 0 && allResults.length === 0) {
+        setError(errors.join('\n'))
+      }
     } catch (err) {
-      setError(err.message)
+      console.error('Search error:', err)
+      setError(err.message || 'Search failed')
       setResults(null)
     } finally {
       setLoading(false)
