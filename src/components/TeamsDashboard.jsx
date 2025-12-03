@@ -1,23 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { 
   Users, GitCommit, GitPullRequest, MessageSquare, Eye, Loader2, 
-  ExternalLink, Calendar, ChevronDown, ChevronRight, Folder, Star,
-  Trophy, Medal, Award, TrendingUp, AlertTriangle, RefreshCw, Filter,
-  Flame, Target, Activity, BarChart3, Crown
+  ExternalLink, Calendar, ChevronDown, Folder, 
+  Trophy, Medal, Award, TrendingUp, AlertTriangle,
+  Flame, Activity, Crown, Building, UserCheck, BarChart3,
+  GitBranch, Code2, Layers
 } from 'lucide-react'
-import { fetchUserTeams, fetchTeamMembers, fetchTeamActivities } from '../api/github'
+import { fetchUserTeams, fetchTeamMembers, fetchTeamRepos, fetchTeamRepoActivities, fetchTeamMemberActivities } from '../api/github'
 import { useToast } from './Toast'
-import { format, subDays, subWeeks, subMonths, isAfter, isSameDay, startOfDay, eachDayOfInterval } from 'date-fns'
+import { format, subDays, isAfter, isSameDay, startOfDay, eachDayOfInterval, subMonths } from 'date-fns'
 
-// ============ ACTIVITY TYPE ICONS ============
-const ACTIVITY_ICONS = {
-  commit: { icon: GitCommit, color: 'text-neon-green', bg: 'bg-neon-green/10' },
-  pr: { icon: GitPullRequest, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-  review: { icon: Eye, color: 'text-electric-400', bg: 'bg-electric-400/10' },
-  comment: { icon: MessageSquare, color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
-}
-
-// ============ TIME FILTERS ============
+// ============ CONSTANTS ============
 const TIME_FILTERS = [
   { key: 'today', label: 'Today', getDate: () => startOfDay(new Date()) },
   { key: 'week', label: 'Last 7 Days', getDate: () => subDays(new Date(), 7) },
@@ -25,60 +18,35 @@ const TIME_FILTERS = [
   { key: 'all', label: 'All Time', getDate: () => null },
 ]
 
+const ACTIVITY_CONFIG = {
+  commit: { icon: GitCommit, color: 'text-neon-green', bg: 'bg-neon-green/10', label: 'Commit' },
+  pr: { icon: GitPullRequest, color: 'text-purple-400', bg: 'bg-purple-500/10', label: 'PR' },
+  review: { icon: Eye, color: 'text-electric-400', bg: 'bg-electric-400/10', label: 'Review' },
+  comment: { icon: MessageSquare, color: 'text-yellow-400', bg: 'bg-yellow-400/10', label: 'Comment' },
+}
+
 // ============ ACTIVITY CARD ============
-function ActivityCard({ activity, org }) {
-  const config = ACTIVITY_ICONS[activity.type] || ACTIVITY_ICONS.commit
+function ActivityCard({ activity }) {
+  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.commit
   const Icon = config.icon
   
-  const getActivityDescription = () => {
-    switch (activity.type) {
-      case 'commit':
-        return activity.message
-      case 'pr':
-        return `${activity.state === 'merged' ? 'Merged' : activity.state === 'open' ? 'Opened' : 'Closed'} PR: ${activity.message}`
-      case 'review':
-        return activity.message
-      case 'comment':
-        return activity.message
-      default:
-        return activity.message
-    }
-  }
-  
   return (
-    <div className="flex items-start gap-3 p-4 bg-void-700/30 border border-void-600/50 rounded-xl hover:border-frost-300/30 transition-all group">
+    <div className="flex items-start gap-3 p-3 bg-void-700/30 border border-void-600/50 rounded-xl hover:border-frost-300/30 transition-all group">
       <div className={`p-2 ${config.bg} rounded-lg flex-shrink-0`}>
         <Icon className={`w-4 h-4 ${config.color}`} />
       </div>
-      
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          {activity.avatarUrl && (
-            <img src={activity.avatarUrl} alt={activity.author} className="w-5 h-5 rounded-full" />
-          )}
-          <span className="text-sm font-medium text-frost-100">{activity.author}</span>
-          <span className="text-xs text-frost-300/40">•</span>
-          <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{activity.repo}</span>
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          {activity.avatarUrl && <img src={activity.avatarUrl} alt="" className="w-4 h-4 rounded-full" />}
+          <span className="text-xs font-medium text-frost-100">{activity.author}</span>
+          <span className="text-xs px-1.5 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{activity.repo}</span>
+          <span className={`text-xs px-1.5 py-0.5 ${config.bg} ${config.color} rounded`}>{config.label}</span>
         </div>
-        <p className="text-sm text-frost-200 line-clamp-2">{getActivityDescription()}</p>
-        <div className="flex items-center gap-3 mt-2 text-xs text-frost-300/60">
-          <span className="flex items-center gap-1">
-            <Calendar className="w-3 h-3" />
-            {format(new Date(activity.date), 'MMM d, h:mm a')}
-          </span>
-          {activity.shortSha && (
-            <span className="font-mono">{activity.shortSha}</span>
-          )}
-        </div>
+        <p className="text-sm text-frost-200 line-clamp-1">{activity.message}</p>
+        <p className="text-xs text-frost-300/50 mt-1">{format(new Date(activity.date), 'MMM d, h:mm a')}</p>
       </div>
-      
-      <a 
-        href={activity.url} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
-      >
-        <ExternalLink className="w-4 h-4 text-frost-300/60 hover:text-electric-400" />
+      <a href={activity.url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-void-600/50 rounded-lg opacity-0 group-hover:opacity-100">
+        <ExternalLink className="w-3.5 h-3.5 text-frost-300/60" />
       </a>
     </div>
   )
@@ -88,61 +56,46 @@ function ActivityCard({ activity, org }) {
 function TeamSelector({ teams, selectedTeam, onSelect, loading }) {
   const [open, setOpen] = useState(false)
   
-  if (loading) {
-    return (
-      <div className="flex items-center gap-3 px-4 py-3 bg-void-700/30 border border-void-600/50 rounded-xl">
-        <Loader2 className="w-5 h-5 text-electric-400 animate-spin" />
-        <span className="text-frost-300/60">Loading teams...</span>
-      </div>
-    )
-  }
+  if (loading) return (
+    <div className="flex items-center gap-3 px-4 py-3 bg-void-700/30 border border-void-600/50 rounded-xl">
+      <Loader2 className="w-5 h-5 text-electric-400 animate-spin" />
+      <span className="text-frost-300/60">Loading teams...</span>
+    </div>
+  )
   
-  if (teams.length === 0) {
-    return (
-      <div className="flex items-center gap-3 px-4 py-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
-        <AlertTriangle className="w-5 h-5 text-yellow-400" />
-        <span className="text-yellow-400">No teams found in this organization</span>
-      </div>
-    )
-  }
+  if (teams.length === 0) return (
+    <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl text-yellow-400 text-sm">
+      <AlertTriangle className="w-5 h-5 inline mr-2" />
+      No teams found. Make sure you have team access in this organization.
+    </div>
+  )
   
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center justify-between gap-3 w-full px-4 py-3 bg-void-700/30 border border-void-600/50 rounded-xl hover:border-frost-300/30 transition-all"
-      >
+      <button onClick={() => setOpen(!open)} className="flex items-center justify-between w-full px-4 py-3 bg-void-700/30 border border-void-600/50 rounded-xl hover:border-electric-400/30 transition-all">
         <div className="flex items-center gap-3">
           <Users className="w-5 h-5 text-electric-400" />
-          <span className="text-frost-100 font-medium">
-            {selectedTeam ? selectedTeam.name : 'Select a team'}
-          </span>
+          <span className="text-frost-100 font-medium">{selectedTeam?.name || 'Select Team'}</span>
           {selectedTeam && (
-            <span className="text-xs px-2 py-0.5 bg-void-600/50 text-frost-300/60 rounded">
-              {selectedTeam.membersCount || '?'} members
-            </span>
+            <>
+              <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded">{selectedTeam.membersCount || '?'} members</span>
+              <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{selectedTeam.reposCount || '?'} repos</span>
+            </>
           )}
         </div>
         <ChevronDown className={`w-4 h-4 text-frost-300/60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-void-800 border border-void-600/50 rounded-xl shadow-2xl overflow-hidden z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-void-800 border border-void-600/50 rounded-xl shadow-2xl overflow-hidden z-50 max-h-64 overflow-y-auto">
           {teams.map(team => (
-            <button
-              key={team.slug}
-              onClick={() => { onSelect(team); setOpen(false) }}
-              className={`flex items-center justify-between w-full px-4 py-3 hover:bg-void-700/50 transition-colors ${
-                selectedTeam?.slug === team.slug ? 'bg-electric-400/10' : ''
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Users className={`w-4 h-4 ${selectedTeam?.slug === team.slug ? 'text-electric-400' : 'text-frost-300/60'}`} />
-                <span className={`font-medium ${selectedTeam?.slug === team.slug ? 'text-electric-400' : 'text-frost-200'}`}>
-                  {team.name}
-                </span>
+            <button key={team.slug} onClick={() => { onSelect(team); setOpen(false) }}
+              className={`flex items-center justify-between w-full px-4 py-3 hover:bg-void-700/50 transition-colors ${selectedTeam?.slug === team.slug ? 'bg-electric-400/10' : ''}`}>
+              <span className={selectedTeam?.slug === team.slug ? 'text-electric-400' : 'text-frost-200'}>{team.name}</span>
+              <div className="flex items-center gap-2 text-xs text-frost-300/60">
+                <span>{team.membersCount} members</span>
+                <span>•</span>
+                <span>{team.reposCount} repos</span>
               </div>
-              <span className="text-xs text-frost-300/60">{team.membersCount || '?'} members</span>
             </button>
           ))}
         </div>
@@ -152,284 +105,324 @@ function TeamSelector({ teams, selectedTeam, onSelect, loading }) {
 }
 
 // ============ LEADERBOARD ============
-function Leaderboard({ memberStats, timeFilter, activities }) {
-  const filteredStats = useMemo(() => {
-    if (!activities || !memberStats) return memberStats || []
-    
-    const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
-    
-    if (!filterDate) return memberStats
-    
-    // Recalculate stats based on filtered activities
-    const statsMap = {}
-    memberStats.forEach(m => {
-      statsMap[m.login] = {
-        ...m,
-        commits: 0,
-        prs: 0,
-        reviews: 0,
-        comments: 0,
-        reposActive: new Set(),
-      }
-    })
-    
-    activities.forEach(a => {
-      if (isAfter(new Date(a.date), filterDate) && statsMap[a.author]) {
-        const s = statsMap[a.author]
-        if (a.type === 'commit') s.commits++
-        else if (a.type === 'pr') s.prs++
-        else if (a.type === 'review') s.reviews++
-        else if (a.type === 'comment') s.comments++
-        if (a.repo) s.reposActive.add(a.repo)
-      }
-    })
-    
-    return Object.values(statsMap).map(s => ({
-      ...s,
-      reposActive: s.reposActive.size,
-      total: s.commits + s.prs + s.reviews + s.comments,
-    }))
-  }, [memberStats, timeFilter, activities])
-  
-  const sorted = useMemo(() => {
-    return [...filteredStats].sort((a, b) => b.total - a.total)
-  }, [filteredStats])
-  
-  const getRankIcon = (index) => {
-    if (index === 0) return <Crown className="w-5 h-5 text-yellow-400" />
-    if (index === 1) return <Medal className="w-5 h-5 text-gray-300" />
-    if (index === 2) return <Award className="w-5 h-5 text-orange-400" />
-    return <span className="w-5 h-5 flex items-center justify-center text-sm text-frost-300/60">#{index + 1}</span>
-  }
-  
-  const getRankBg = (index) => {
-    if (index === 0) return 'bg-gradient-to-r from-yellow-400/10 to-orange-400/10 border-yellow-400/30'
-    if (index === 1) return 'bg-gradient-to-r from-gray-300/10 to-gray-400/10 border-gray-400/30'
-    if (index === 2) return 'bg-gradient-to-r from-orange-400/10 to-red-400/10 border-orange-400/30'
-    return 'bg-void-700/30 border-void-600/50'
+function Leaderboard({ stats, title, showRepos = true }) {
+  const getRank = (i) => {
+    if (i === 0) return { icon: Crown, color: 'text-yellow-400', bg: 'from-yellow-400/10 to-orange-400/10 border-yellow-400/30' }
+    if (i === 1) return { icon: Medal, color: 'text-gray-300', bg: 'from-gray-400/10 to-gray-500/10 border-gray-400/30' }
+    if (i === 2) return { icon: Award, color: 'text-orange-400', bg: 'from-orange-400/10 to-red-400/10 border-orange-400/30' }
+    return { icon: null, color: 'text-frost-300/60', bg: 'bg-void-700/30 border-void-600/50' }
   }
   
   return (
-    <div className="space-y-3">
-      {sorted.map((member, index) => (
-        <div 
-          key={member.login}
-          className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${getRankBg(index)}`}
-        >
-          <div className="flex-shrink-0">
-            {getRankIcon(index)}
-          </div>
-          
-          <img 
-            src={member.avatarUrl} 
-            alt={member.login} 
-            className="w-10 h-10 rounded-full flex-shrink-0 border-2 border-void-600/50"
-          />
-          
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-frost-100 truncate">{member.login}</p>
-            <div className="flex items-center gap-4 mt-1 text-xs">
-              <span className="flex items-center gap-1 text-neon-green">
-                <GitCommit className="w-3 h-3" /> {member.commits}
-              </span>
-              <span className="flex items-center gap-1 text-purple-400">
-                <GitPullRequest className="w-3 h-3" /> {member.prs}
-              </span>
-              <span className="flex items-center gap-1 text-electric-400">
-                <Eye className="w-3 h-3" /> {member.reviews}
-              </span>
-              <span className="flex items-center gap-1 text-yellow-400">
-                <MessageSquare className="w-3 h-3" /> {member.comments}
-              </span>
+    <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-5">
+      <h3 className="text-frost-100 font-semibold mb-4 flex items-center gap-2">
+        <Trophy className="w-5 h-5 text-yellow-400" /> {title}
+      </h3>
+      <div className="space-y-2">
+        {stats.slice(0, 10).map((s, i) => {
+          const rank = getRank(i)
+          const RankIcon = rank.icon
+          return (
+            <div key={s.login} className={`flex items-center gap-3 p-3 rounded-xl border bg-gradient-to-r ${rank.bg}`}>
+              <div className="w-6 flex justify-center">
+                {RankIcon ? <RankIcon className={`w-5 h-5 ${rank.color}`} /> : <span className="text-sm text-frost-300/60">#{i + 1}</span>}
+              </div>
+              {s.avatarUrl && <img src={s.avatarUrl} alt="" className="w-8 h-8 rounded-full" />}
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-frost-100 text-sm truncate">{s.login}</p>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-neon-green flex items-center gap-1"><GitCommit className="w-3 h-3" />{s.commits}</span>
+                  <span className="text-purple-400 flex items-center gap-1"><GitPullRequest className="w-3 h-3" />{s.prs}</span>
+                  {s.reviews > 0 && <span className="text-electric-400 flex items-center gap-1"><Eye className="w-3 h-3" />{s.reviews}</span>}
+                  {s.comments > 0 && <span className="text-yellow-400 flex items-center gap-1"><MessageSquare className="w-3 h-3" />{s.comments}</span>}
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xl font-bold text-frost-100">{s.total}</p>
+                {showRepos && <p className="text-xs text-frost-300/50">{s.reposActive} repos</p>}
+              </div>
             </div>
-          </div>
-          
-          <div className="text-right flex-shrink-0">
-            <p className="text-2xl font-bold text-frost-100">{member.total}</p>
-            <p className="text-xs text-frost-300/60">{member.reposActive} repos</p>
-          </div>
-        </div>
-      ))}
-      
-      {sorted.length === 0 && (
-        <div className="text-center py-8 text-frost-300/60">
-          <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>No activity data available</p>
-        </div>
-      )}
+          )
+        })}
+        {stats.length === 0 && <p className="text-center py-6 text-frost-300/50">No data yet</p>}
+      </div>
     </div>
   )
 }
 
-// ============ TEAM HEATMAP ============
-function TeamHeatmap({ activities, selectedDate, onDateSelect }) {
+// ============ MINI HEATMAP ============
+function MiniHeatmap({ activities, selectedDate, onDateSelect }) {
   const today = new Date()
-  const startDate = subMonths(today, 3)
+  const startDate = subMonths(today, 2)
   
   const activityMap = useMemo(() => {
     const map = {}
-    if (!activities) return map
-    
-    activities.forEach(a => {
-      const dateKey = format(new Date(a.date), 'yyyy-MM-dd')
-      map[dateKey] = (map[dateKey] || 0) + 1
+    activities?.forEach(a => {
+      const key = format(new Date(a.date), 'yyyy-MM-dd')
+      map[key] = (map[key] || 0) + 1
     })
     return map
   }, [activities])
   
-  const days = useMemo(() => {
-    return eachDayOfInterval({ start: startDate, end: today })
-  }, [startDate, today])
-  
-  const weeks = useMemo(() => {
-    const w = []
-    let currentWeek = []
-    
-    // Fill in empty days at start
-    const firstDayOfWeek = days[0].getDay()
-    for (let i = 0; i < firstDayOfWeek; i++) {
-      currentWeek.push(null)
-    }
-    
-    for (const day of days) {
-      currentWeek.push(day)
-      if (day.getDay() === 6) {
-        w.push(currentWeek)
-        currentWeek = []
-      }
-    }
-    
-    if (currentWeek.length > 0) {
-      while (currentWeek.length < 7) currentWeek.push(null)
-      w.push(currentWeek)
-    }
-    
-    return w
-  }, [days])
-  
+  const days = eachDayOfInterval({ start: startDate, end: today })
   const maxCount = Math.max(...Object.values(activityMap), 1)
   
-  const getIntensity = (count) => {
-    if (count === 0) return 'bg-void-700/50'
-    const ratio = count / maxCount
-    if (ratio < 0.25) return 'bg-electric-400/20'
-    if (ratio < 0.5) return 'bg-electric-400/40'
-    if (ratio < 0.75) return 'bg-electric-400/60'
+  const getColor = (count) => {
+    if (!count) return 'bg-void-700/30'
+    const r = count / maxCount
+    if (r < 0.25) return 'bg-electric-400/20'
+    if (r < 0.5) return 'bg-electric-400/40'
+    if (r < 0.75) return 'bg-electric-400/60'
     return 'bg-electric-400'
   }
   
   return (
-    <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-electric-400/10 rounded-xl">
-            <Flame className="w-5 h-5 text-electric-400" />
-          </div>
-          <div>
-            <h3 className="text-frost-100 font-semibold">Team Activity Heatmap</h3>
-            <p className="text-xs text-frost-300/60">Last 3 months of activity</p>
-          </div>
-        </div>
-        {selectedDate && (
-          <button 
-            onClick={() => onDateSelect(null)}
-            className="text-xs text-frost-300/60 hover:text-frost-200 px-3 py-1.5 bg-void-600/50 rounded-lg"
-          >
-            Clear: {format(selectedDate, 'MMM d')}
-          </button>
-        )}
+    <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-frost-300/60 flex items-center gap-1"><Flame className="w-3 h-3" /> Activity Heatmap</span>
+        {selectedDate && <button onClick={() => onDateSelect(null)} className="text-xs text-electric-400">Clear</button>}
       </div>
-      
-      <div className="overflow-x-auto">
-        <div className="inline-flex gap-1">
-          {weeks.map((week, wi) => (
-            <div key={wi} className="flex flex-col gap-1">
-              {week.map((day, di) => {
-                if (!day) return <div key={di} className="w-3 h-3" />
-                
-                const dateKey = format(day, 'yyyy-MM-dd')
-                const count = activityMap[dateKey] || 0
-                const isSelected = selectedDate && isSameDay(day, selectedDate)
-                
-                return (
-                  <button
-                    key={di}
-                    onClick={() => onDateSelect(day)}
-                    className={`w-3 h-3 rounded-sm transition-all ${getIntensity(count)} ${
-                      isSelected ? 'ring-2 ring-electric-400 ring-offset-1 ring-offset-void-900' : 'hover:ring-1 hover:ring-frost-300/30'
-                    }`}
-                    title={`${format(day, 'MMM d, yyyy')}: ${count} activities`}
-                  />
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      <div className="flex items-center justify-between mt-4 text-xs text-frost-300/60">
-        <span>Less</span>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 bg-void-700/50 rounded-sm" />
-          <div className="w-3 h-3 bg-electric-400/20 rounded-sm" />
-          <div className="w-3 h-3 bg-electric-400/40 rounded-sm" />
-          <div className="w-3 h-3 bg-electric-400/60 rounded-sm" />
-          <div className="w-3 h-3 bg-electric-400 rounded-sm" />
-        </div>
-        <span>More</span>
+      <div className="flex gap-0.5 flex-wrap">
+        {days.map(day => {
+          const key = format(day, 'yyyy-MM-dd')
+          const count = activityMap[key] || 0
+          const isSelected = selectedDate && isSameDay(day, selectedDate)
+          return (
+            <button key={key} onClick={() => onDateSelect(day)} title={`${format(day, 'MMM d')}: ${count}`}
+              className={`w-2.5 h-2.5 rounded-sm ${getColor(count)} ${isSelected ? 'ring-1 ring-electric-400' : ''}`} />
+          )
+        })}
       </div>
     </div>
   )
 }
 
 // ============ STATS CARDS ============
-function TeamStats({ memberStats, timeFilter, activities }) {
-  const stats = useMemo(() => {
-    if (!memberStats) return { commits: 0, prs: 0, reviews: 0, comments: 0, members: 0 }
-    
+function StatsCards({ stats, activities, timeFilter }) {
+  const filtered = useMemo(() => {
     const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
+    if (!filterDate || !activities) return stats
     
     let commits = 0, prs = 0, reviews = 0, comments = 0
-    
-    if (!filterDate) {
-      memberStats.forEach(m => {
-        commits += m.commits
-        prs += m.prs
-        reviews += m.reviews
-        comments += m.comments
-      })
-    } else if (activities) {
-      activities.forEach(a => {
-        if (isAfter(new Date(a.date), filterDate)) {
-          if (a.type === 'commit') commits++
-          else if (a.type === 'pr') prs++
-          else if (a.type === 'review') reviews++
-          else if (a.type === 'comment') comments++
-        }
-      })
-    }
-    
-    return { commits, prs, reviews, comments, members: memberStats.length }
-  }, [memberStats, timeFilter, activities])
+    activities.forEach(a => {
+      if (isAfter(new Date(a.date), filterDate)) {
+        if (a.type === 'commit') commits++
+        else if (a.type === 'pr') prs++
+        else if (a.type === 'review') reviews++
+        else if (a.type === 'comment') comments++
+      }
+    })
+    return { commits, prs, reviews, comments }
+  }, [stats, activities, timeFilter])
   
   const cards = [
-    { label: 'Commits', value: stats.commits, icon: GitCommit, color: 'neon-green' },
-    { label: 'Pull Requests', value: stats.prs, icon: GitPullRequest, color: 'purple-400' },
-    { label: 'Reviews', value: stats.reviews, icon: Eye, color: 'electric-400' },
-    { label: 'Comments', value: stats.comments, icon: MessageSquare, color: 'yellow-400' },
+    { label: 'Commits', value: filtered.commits || 0, icon: GitCommit, color: 'neon-green' },
+    { label: 'Pull Requests', value: filtered.prs || 0, icon: GitPullRequest, color: 'purple-400' },
+    { label: 'Reviews', value: filtered.reviews || 0, icon: Eye, color: 'electric-400' },
+    { label: 'Comments', value: filtered.comments || 0, icon: MessageSquare, color: 'yellow-400' },
   ]
   
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {cards.map(card => (
-        <div key={card.label} className="bg-void-700/30 border border-void-600/50 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <card.icon className={`w-4 h-4 text-${card.color}`} />
-            <span className="text-xs text-frost-300/60">{card.label}</span>
-          </div>
-          <p className="text-2xl font-bold text-frost-100">{card.value.toLocaleString()}</p>
+    <div className="grid grid-cols-4 gap-3">
+      {cards.map(c => (
+        <div key={c.label} className="bg-void-700/30 border border-void-600/50 rounded-xl p-3 text-center">
+          <c.icon className={`w-5 h-5 text-${c.color} mx-auto mb-1`} />
+          <p className="text-2xl font-bold text-frost-100">{c.value}</p>
+          <p className="text-xs text-frost-300/50">{c.label}</p>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ============ SECTION: TEAM REPOS ============
+function TeamReposSection({ token, org, repos, onBack }) {
+  const [activities, setActivities] = useState([])
+  const [stats, setStats] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [progress, setProgress] = useState(null)
+  const [timeFilter, setTimeFilter] = useState('week')
+  const [selectedDate, setSelectedDate] = useState(null)
+  const toast = useToast()
+  
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      try {
+        const data = await fetchTeamRepoActivities(token, org, repos, setProgress)
+        setActivities(data.activities)
+        setStats(data.contributorStats)
+        toast.success(`Loaded ${data.activities.length} activities from ${repos.length} repos`)
+      } catch (e) {
+        toast.apiError(e.message)
+      } finally {
+        setLoading(false)
+        setProgress(null)
+      }
+    }
+    load()
+  }, [token, org, repos])
+  
+  const filteredActivities = useMemo(() => {
+    let filtered = activities
+    if (selectedDate) {
+      filtered = filtered.filter(a => isSameDay(new Date(a.date), selectedDate))
+    } else {
+      const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
+      if (filterDate) filtered = filtered.filter(a => isAfter(new Date(a.date), filterDate))
+    }
+    return filtered
+  }, [activities, timeFilter, selectedDate])
+  
+  const totals = useMemo(() => {
+    return stats.reduce((acc, s) => ({
+      commits: acc.commits + s.commits,
+      prs: acc.prs + s.prs,
+      reviews: acc.reviews + (s.reviews || 0),
+      comments: acc.comments + (s.comments || 0),
+    }), { commits: 0, prs: 0, reviews: 0, comments: 0 })
+  }, [stats])
+  
+  if (loading) return (
+    <div className="text-center py-12">
+      <Loader2 className="w-8 h-8 text-electric-400 animate-spin mx-auto mb-4" />
+      <p className="text-frost-300/60">{progress?.status || 'Loading...'}</p>
+      {progress?.percentage > 0 && (
+        <div className="max-w-xs mx-auto mt-3 h-1.5 bg-void-600/50 rounded-full overflow-hidden">
+          <div className="h-full bg-electric-400" style={{ width: `${progress.percentage}%` }} />
+        </div>
+      )}
+    </div>
+  )
+  
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-yellow-400/20 rounded-xl"><Folder className="w-5 h-5 text-yellow-400" /></div>
+          <div>
+            <h3 className="text-frost-100 font-semibold">Team Repositories Activity</h3>
+            <p className="text-xs text-frost-300/60">All activities in {repos.length} team repos (by anyone)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-lg">
+          {TIME_FILTERS.map(f => (
+            <button key={f.key} onClick={() => { setTimeFilter(f.key); setSelectedDate(null) }}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${timeFilter === f.key && !selectedDate ? 'bg-electric-400 text-void-900' : 'text-frost-300/60 hover:text-frost-200'}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      <StatsCards stats={totals} activities={activities} timeFilter={timeFilter} />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-4">
+          <MiniHeatmap activities={activities} selectedDate={selectedDate} onDateSelect={setSelectedDate} />
+          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+            {filteredActivities.slice(0, 100).map(a => <ActivityCard key={a.id} activity={a} />)}
+            {filteredActivities.length === 0 && <p className="text-center py-8 text-frost-300/50">No activities in this period</p>}
+          </div>
+        </div>
+        <Leaderboard stats={stats} title="Top Contributors" />
+      </div>
+    </div>
+  )
+}
+
+// ============ SECTION: TEAM MEMBERS ============
+function TeamMembersSection({ token, org, members }) {
+  const [activities, setActivities] = useState([])
+  const [stats, setStats] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [progress, setProgress] = useState(null)
+  const [timeFilter, setTimeFilter] = useState('week')
+  const [selectedDate, setSelectedDate] = useState(null)
+  const toast = useToast()
+  
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      try {
+        const data = await fetchTeamMemberActivities(token, org, members, setProgress)
+        setActivities(data.activities)
+        setStats(data.memberStats)
+        toast.success(`Loaded ${data.activities.length} activities from ${members.length} members`)
+      } catch (e) {
+        toast.apiError(e.message)
+      } finally {
+        setLoading(false)
+        setProgress(null)
+      }
+    }
+    load()
+  }, [token, org, members])
+  
+  const filteredActivities = useMemo(() => {
+    let filtered = activities
+    if (selectedDate) {
+      filtered = filtered.filter(a => isSameDay(new Date(a.date), selectedDate))
+    } else {
+      const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
+      if (filterDate) filtered = filtered.filter(a => isAfter(new Date(a.date), filterDate))
+    }
+    return filtered
+  }, [activities, timeFilter, selectedDate])
+  
+  const totals = useMemo(() => {
+    return stats.reduce((acc, s) => ({
+      commits: acc.commits + s.commits,
+      prs: acc.prs + s.prs,
+      reviews: acc.reviews + (s.reviews || 0),
+      comments: acc.comments + (s.comments || 0),
+    }), { commits: 0, prs: 0, reviews: 0, comments: 0 })
+  }, [stats])
+  
+  if (loading) return (
+    <div className="text-center py-12">
+      <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-4" />
+      <p className="text-frost-300/60">{progress?.status || 'Loading...'}</p>
+      {progress?.percentage > 0 && (
+        <div className="max-w-xs mx-auto mt-3 h-1.5 bg-void-600/50 rounded-full overflow-hidden">
+          <div className="h-full bg-purple-400" style={{ width: `${progress.percentage}%` }} />
+        </div>
+      )}
+    </div>
+  )
+  
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-purple-500/20 rounded-xl"><UserCheck className="w-5 h-5 text-purple-400" /></div>
+          <div>
+            <h3 className="text-frost-100 font-semibold">Team Members Activity</h3>
+            <p className="text-xs text-frost-300/60">All activities by {members.length} members (anywhere in org)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-lg">
+          {TIME_FILTERS.map(f => (
+            <button key={f.key} onClick={() => { setTimeFilter(f.key); setSelectedDate(null) }}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${timeFilter === f.key && !selectedDate ? 'bg-purple-400 text-void-900' : 'text-frost-300/60 hover:text-frost-200'}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      <StatsCards stats={totals} activities={activities} timeFilter={timeFilter} />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-4">
+          <MiniHeatmap activities={activities} selectedDate={selectedDate} onDateSelect={setSelectedDate} />
+          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+            {filteredActivities.slice(0, 100).map(a => <ActivityCard key={a.id} activity={a} />)}
+            {filteredActivities.length === 0 && <p className="text-center py-8 text-frost-300/50">No activities in this period</p>}
+          </div>
+        </div>
+        <Leaderboard stats={stats} title="Member Leaderboard" />
+      </div>
     </div>
   )
 }
@@ -440,103 +433,58 @@ export function TeamsDashboard({ token, org }) {
   const [loadingTeams, setLoadingTeams] = useState(true)
   const [selectedTeam, setSelectedTeam] = useState(null)
   const [members, setMembers] = useState([])
-  const [loadingMembers, setLoadingMembers] = useState(false)
-  const [activities, setActivities] = useState([])
-  const [memberStats, setMemberStats] = useState([])
-  const [loadingActivities, setLoadingActivities] = useState(false)
-  const [progress, setProgress] = useState(null)
-  const [timeFilter, setTimeFilter] = useState('week')
-  const [activityTypeFilter, setActivityTypeFilter] = useState('all')
-  const [selectedDate, setSelectedDate] = useState(null)
-  
+  const [repos, setRepos] = useState([])
+  const [loadingTeamData, setLoadingTeamData] = useState(false)
+  const [activeSection, setActiveSection] = useState('repos') // 'repos' | 'members'
   const toast = useToast()
 
-  // Load teams on mount
+  // Load teams
   useEffect(() => {
-    const loadTeams = async () => {
+    const load = async () => {
       if (!token || !org) return
-      
       setLoadingTeams(true)
       try {
-        const userTeams = await fetchUserTeams(token, org)
-        setTeams(userTeams)
-        if (userTeams.length > 0) {
-          setSelectedTeam(userTeams[0])
-        }
+        const t = await fetchUserTeams(token, org)
+        setTeams(t)
+        if (t.length > 0) setSelectedTeam(t[0])
       } catch (e) {
-        toast.apiError(e.message || 'Failed to load teams')
+        toast.apiError(e.message)
       } finally {
         setLoadingTeams(false)
       }
     }
-    
-    loadTeams()
+    load()
   }, [token, org])
 
-  // Load team members when team is selected
+  // Load team members & repos when team selected
   useEffect(() => {
-    const loadMembers = async () => {
-      if (!selectedTeam || !token || !org) return
-      
-      setLoadingMembers(true)
+    const load = async () => {
+      if (!selectedTeam) return
+      setLoadingTeamData(true)
       setMembers([])
-      setActivities([])
-      setMemberStats([])
-      
+      setRepos([])
       try {
-        const teamMembers = await fetchTeamMembers(token, org, selectedTeam.slug)
-        setMembers(teamMembers)
-        toast.info(`Loaded ${teamMembers.length} team members`)
-        
-        // Now load activities
-        setLoadingActivities(true)
-        setProgress({ status: 'Loading activities...', percentage: 0 })
-        
-        const data = await fetchTeamActivities(token, org, teamMembers, setProgress)
-        setActivities(data.activities)
-        setMemberStats(data.memberStats)
-        toast.success(`Loaded ${data.activities.length} team activities`)
+        const [m, r] = await Promise.all([
+          fetchTeamMembers(token, org, selectedTeam.slug),
+          fetchTeamRepos(token, org, selectedTeam.slug),
+        ])
+        setMembers(m)
+        setRepos(r)
+        toast.info(`Team: ${m.length} members, ${r.length} repos`)
       } catch (e) {
-        toast.apiError(e.message || 'Failed to load team data')
+        toast.apiError(e.message)
       } finally {
-        setLoadingMembers(false)
-        setLoadingActivities(false)
-        setProgress(null)
+        setLoadingTeamData(false)
       }
     }
-    
-    loadMembers()
+    load()
   }, [selectedTeam, token, org])
-
-  // Filter activities
-  const filteredActivities = useMemo(() => {
-    let filtered = activities
-    
-    // Filter by date from heatmap
-    if (selectedDate) {
-      filtered = filtered.filter(a => isSameDay(new Date(a.date), selectedDate))
-    } else {
-      // Filter by time range
-      const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
-      if (filterDate) {
-        filtered = filtered.filter(a => isAfter(new Date(a.date), filterDate))
-      }
-    }
-    
-    // Filter by activity type
-    if (activityTypeFilter !== 'all') {
-      filtered = filtered.filter(a => a.type === activityTypeFilter)
-    }
-    
-    return filtered
-  }, [activities, timeFilter, activityTypeFilter, selectedDate])
 
   if (!token || !org) {
     return (
-      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
+      <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-xl text-center">
         <AlertTriangle className="w-8 h-8 text-red-400 mx-auto mb-3" />
-        <p className="text-red-400 font-medium">Missing Configuration</p>
-        <p className="text-sm text-red-400/70 mt-1">{!token && 'No token. '}{!org && 'No organization selected.'}</p>
+        <p className="text-red-400">Please configure your organization first</p>
       </div>
     )
   }
@@ -544,171 +492,92 @@ export function TeamsDashboard({ token, org }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-br from-electric-400/10 via-purple-500/5 to-neon-pink/10 border border-electric-400/30 rounded-2xl p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-electric-400/20 rounded-xl">
-            <Users className="w-6 h-6 text-electric-400" />
+      <div className="bg-gradient-to-br from-electric-400/10 via-purple-500/10 to-yellow-400/10 border border-electric-400/30 rounded-2xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-gradient-to-br from-electric-400 to-purple-500 rounded-xl">
+            <Building className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h2 className="text-frost-100 font-semibold text-lg">Teams Dashboard</h2>
-            <p className="text-xs text-frost-300/60">Track all activities across your team members</p>
+            <h2 className="text-frost-100 font-bold text-xl">Teams Analytics</h2>
+            <p className="text-xs text-frost-300/60">Monitor team repos & member activities</p>
           </div>
         </div>
-        
-        <TeamSelector 
-          teams={teams} 
-          selectedTeam={selectedTeam} 
-          onSelect={setSelectedTeam}
-          loading={loadingTeams}
-        />
+        <TeamSelector teams={teams} selectedTeam={selectedTeam} onSelect={setSelectedTeam} loading={loadingTeams} />
       </div>
 
-      {/* Loading State */}
-      {(loadingMembers || loadingActivities) && (
-        <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-8 text-center">
-          <Loader2 className="w-8 h-8 text-electric-400 animate-spin mx-auto mb-4" />
-          <p className="text-frost-300/60">{progress?.status || 'Loading team data...'}</p>
-          {progress?.percentage > 0 && (
-            <div className="mt-4 max-w-xs mx-auto">
-              <div className="h-2 bg-void-600/50 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-electric-400 transition-all"
-                  style={{ width: `${progress.percentage}%` }}
-                />
-              </div>
-              <p className="text-xs text-frost-300/40 mt-2">{progress.percentage}%</p>
-            </div>
-          )}
+      {/* Team Info */}
+      {selectedTeam && !loadingTeamData && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 text-center">
+            <Users className="w-6 h-6 text-purple-400 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-frost-100">{members.length}</p>
+            <p className="text-xs text-frost-300/60">Team Members</p>
+          </div>
+          <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 text-center">
+            <Folder className="w-6 h-6 text-yellow-400 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-frost-100">{repos.length}</p>
+            <p className="text-xs text-frost-300/60">Team Repos</p>
+          </div>
+          <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 text-center">
+            <Code2 className="w-6 h-6 text-neon-green mx-auto mb-2" />
+            <p className="text-2xl font-bold text-frost-100">{repos.filter(r => r.permissions?.push).length}</p>
+            <p className="text-xs text-frost-300/60">Write Access</p>
+          </div>
+          <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 text-center">
+            <Layers className="w-6 h-6 text-electric-400 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-frost-100">{repos.filter(r => r.permissions?.admin).length}</p>
+            <p className="text-xs text-frost-300/60">Admin Access</p>
+          </div>
         </div>
       )}
 
-      {/* Content */}
-      {selectedTeam && !loadingActivities && activities.length > 0 && (
-        <>
-          {/* Time Filter & Stats */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-xl border border-void-600/50">
-              {TIME_FILTERS.map(filter => (
-                <button
-                  key={filter.key}
-                  onClick={() => { setTimeFilter(filter.key); setSelectedDate(null) }}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    timeFilter === filter.key && !selectedDate
-                      ? 'bg-electric-400 text-void-900'
-                      : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-xl border border-void-600/50">
-              <button
-                onClick={() => setActivityTypeFilter('all')}
-                className={`px-3 py-2 rounded-lg text-sm transition-all ${activityTypeFilter === 'all' ? 'bg-frost-100 text-void-900' : 'text-frost-300/60 hover:text-frost-200'}`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setActivityTypeFilter('commit')}
-                className={`p-2 rounded-lg transition-all ${activityTypeFilter === 'commit' ? 'bg-neon-green/20 text-neon-green' : 'text-frost-300/60 hover:text-frost-200'}`}
-              >
-                <GitCommit className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setActivityTypeFilter('pr')}
-                className={`p-2 rounded-lg transition-all ${activityTypeFilter === 'pr' ? 'bg-purple-500/20 text-purple-400' : 'text-frost-300/60 hover:text-frost-200'}`}
-              >
-                <GitPullRequest className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setActivityTypeFilter('review')}
-                className={`p-2 rounded-lg transition-all ${activityTypeFilter === 'review' ? 'bg-electric-400/20 text-electric-400' : 'text-frost-300/60 hover:text-frost-200'}`}
-              >
-                <Eye className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setActivityTypeFilter('comment')}
-                className={`p-2 rounded-lg transition-all ${activityTypeFilter === 'comment' ? 'bg-yellow-400/20 text-yellow-400' : 'text-frost-300/60 hover:text-frost-200'}`}
-              >
-                <MessageSquare className="w-4 h-4" />
-              </button>
-            </div>
-            
-            {selectedDate && (
-              <div className="px-3 py-2 bg-neon-pink/10 border border-neon-pink/30 rounded-lg text-sm text-neon-pink">
-                Showing: {format(selectedDate, 'MMMM d, yyyy')}
-              </div>
-            )}
-          </div>
-          
-          {/* Stats */}
-          <TeamStats memberStats={memberStats} timeFilter={timeFilter} activities={activities} />
-          
-          {/* Main Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Activity Feed */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-frost-100 font-medium flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-electric-400" />
-                  Team Activity Feed
-                  <span className="text-xs px-2 py-0.5 bg-void-600/50 rounded text-frost-300/60">
-                    {filteredActivities.length}
-                  </span>
-                </h3>
-              </div>
-              
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                {filteredActivities.length === 0 ? (
-                  <div className="text-center py-12 text-frost-300/60">
-                    <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No activities in this time range</p>
-                  </div>
-                ) : (
-                  filteredActivities.slice(0, 50).map(activity => (
-                    <ActivityCard key={activity.id} activity={activity} org={org} />
-                  ))
-                )}
-              </div>
-            </div>
-            
-            {/* Leaderboard */}
-            <div className="space-y-4">
-              <h3 className="text-frost-100 font-medium flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-yellow-400" />
-                Team Leaderboard
-              </h3>
-              
-              <Leaderboard 
-                memberStats={memberStats} 
-                timeFilter={timeFilter} 
-                activities={activities}
-              />
-            </div>
-          </div>
-          
-          {/* Heatmap */}
-          <TeamHeatmap 
-            activities={activities}
-            selectedDate={selectedDate}
-            onDateSelect={setSelectedDate}
-          />
-        </>
+      {/* Section Tabs */}
+      {selectedTeam && !loadingTeamData && (members.length > 0 || repos.length > 0) && (
+        <div className="flex items-center gap-2 p-1.5 bg-void-700/30 rounded-xl border border-void-600/50 w-fit">
+          <button onClick={() => setActiveSection('repos')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all ${activeSection === 'repos' ? 'bg-yellow-400 text-void-900' : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'}`}>
+            <Folder className="w-4 h-4" />
+            Team Repos
+            <span className="text-xs px-1.5 py-0.5 rounded bg-void-900/20">{repos.length}</span>
+          </button>
+          <button onClick={() => setActiveSection('members')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all ${activeSection === 'members' ? 'bg-purple-500 text-white' : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'}`}>
+            <Users className="w-4 h-4" />
+            Team Members
+            <span className="text-xs px-1.5 py-0.5 rounded bg-void-900/20">{members.length}</span>
+          </button>
+        </div>
       )}
-      
-      {/* Empty State */}
-      {selectedTeam && !loadingActivities && activities.length === 0 && (
-        <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-12 text-center">
-          <Users className="w-16 h-16 text-frost-300/30 mx-auto mb-4" />
-          <h3 className="text-frost-100 font-medium mb-2">No Activities Found</h3>
-          <p className="text-frost-300/60 text-sm">
-            This team has no recent activities or the members haven't made any contributions yet.
-          </p>
+
+      {/* Loading team data */}
+      {loadingTeamData && (
+        <div className="text-center py-12">
+          <Loader2 className="w-8 h-8 text-electric-400 animate-spin mx-auto mb-4" />
+          <p className="text-frost-300/60">Loading team members and repositories...</p>
+        </div>
+      )}
+
+      {/* Content Sections */}
+      {selectedTeam && !loadingTeamData && activeSection === 'repos' && repos.length > 0 && (
+        <TeamReposSection token={token} org={org} repos={repos} />
+      )}
+      {selectedTeam && !loadingTeamData && activeSection === 'members' && members.length > 0 && (
+        <TeamMembersSection token={token} org={org} members={members} />
+      )}
+
+      {/* Empty states */}
+      {selectedTeam && !loadingTeamData && repos.length === 0 && activeSection === 'repos' && (
+        <div className="text-center py-12 bg-void-700/30 border border-void-600/50 rounded-xl">
+          <Folder className="w-12 h-12 text-frost-300/30 mx-auto mb-4" />
+          <p className="text-frost-300/60">This team has no repositories</p>
+        </div>
+      )}
+      {selectedTeam && !loadingTeamData && members.length === 0 && activeSection === 'members' && (
+        <div className="text-center py-12 bg-void-700/30 border border-void-600/50 rounded-xl">
+          <Users className="w-12 h-12 text-frost-300/30 mx-auto mb-4" />
+          <p className="text-frost-300/60">This team has no members</p>
         </div>
       )}
     </div>
   )
 }
-
