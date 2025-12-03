@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { 
   Search, FileCode, Folder, ExternalLink, Code2, Loader2, AlertCircle, 
   ChevronDown, ChevronUp, GitBranch, Check, X, FolderTree, ArrowRight,
-  RotateCcw, Sparkles
+  RotateCcw, Sparkles, GitCommit, Link
 } from 'lucide-react'
 import { searchCode, getFileContent, fetchBranches, fetchRepoTree } from '../api/github'
 import { FileTree } from './FileTree'
@@ -12,10 +12,14 @@ const LANGUAGES = [
   'C', 'C++', 'C#', 'Swift', 'Kotlin', 'HTML', 'CSS', 'JSON', 'YAML', 'Markdown'
 ]
 
-function CodePreview({ result, token, org, selectedBranch }) {
+function CodePreview({ result, token, org, selectedBranches }) {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState(null)
   const [loading, setLoading] = useState(false)
+
+  const branch = selectedBranches?.length > 0 ? selectedBranches[0] : 'main'
+  const branchUrl = `https://github.com/${org}/${result.repository.name}/tree/${branch}`
+  const fileUrlWithBranch = `https://github.com/${org}/${result.repository.name}/blob/${branch}/${result.path}`
 
   const loadContent = async () => {
     if (content) {
@@ -30,7 +34,7 @@ function CodePreview({ result, token, org, selectedBranch }) {
         org, 
         result.repository.name, 
         result.path,
-        selectedBranch || 'main'
+        branch
       )
       setContent(fileContent)
       setExpanded(true)
@@ -49,7 +53,16 @@ function CodePreview({ result, token, org, selectedBranch }) {
             <div className="p-2 bg-electric-400/10 rounded-lg flex-shrink-0">
               <FileCode className="w-4 h-4 text-electric-400" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded font-medium">
+                  {result.repository.name}
+                </span>
+                <span className="text-xs px-2 py-0.5 bg-electric-400/20 text-electric-400 rounded flex items-center gap-1">
+                  <GitBranch className="w-3 h-3" />
+                  {branch}
+                </span>
+              </div>
               <h3 className="text-frost-100 font-medium truncate">
                 {result.name}
               </h3>
@@ -59,7 +72,16 @@ function CodePreview({ result, token, org, selectedBranch }) {
             </div>
           </div>
           
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <a
+              href={branchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 hover:bg-void-600/50 rounded-lg transition-colors"
+              title="Open branch on GitHub"
+            >
+              <GitBranch className="w-4 h-4 text-frost-300/60 hover:text-electric-400" />
+            </a>
             <button
               onClick={loadContent}
               disabled={loading}
@@ -75,15 +97,46 @@ function CodePreview({ result, token, org, selectedBranch }) {
               )}
             </button>
             <a
-              href={result.url}
+              href={fileUrlWithBranch}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2 hover:bg-void-600/50 rounded-lg transition-colors"
-              title="Open on GitHub"
+              title="Open file on GitHub"
             >
               <ExternalLink className="w-4 h-4 text-frost-300/60 group-hover:text-electric-400" />
             </a>
           </div>
+        </div>
+
+        {/* Quick links */}
+        <div className="flex items-center gap-3 mt-3 pt-3 border-t border-void-600/30">
+          <a
+            href={fileUrlWithBranch}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-electric-400 hover:text-electric-500 transition-colors"
+          >
+            <Link className="w-3 h-3" />
+            View in {branch}
+          </a>
+          <a
+            href={branchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors"
+          >
+            <GitBranch className="w-3 h-3" />
+            Browse branch
+          </a>
+          <a
+            href={`https://github.com/${org}/${result.repository.name}/commits/${branch}/${result.path}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors"
+          >
+            <GitCommit className="w-3 h-3" />
+            View commits
+          </a>
         </div>
 
         {result.textMatches && result.textMatches.length > 0 && (
@@ -162,104 +215,152 @@ function StepIndicator({ step, currentStep, label, icon: Icon }) {
       }`}>
         {isComplete ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
       </div>
-      <span className={`text-sm font-medium ${isActive ? 'text-frost-100' : ''}`}>{label}</span>
+      <span className={`text-sm font-medium hidden md:block ${isActive ? 'text-frost-100' : ''}`}>{label}</span>
     </div>
   )
 }
 
 export function CodeSearch({ token, org, allRepos }) {
-  // Current step: 1=repo, 2=branch, 3=files, 4=search
   const [step, setStep] = useState(1)
   
-  // Selections
-  const [selectedRepo, setSelectedRepo] = useState(null)
-  const [branches, setBranches] = useState([])
-  const [selectedBranches, setSelectedBranches] = useState(new Set())
+  // Multi-select repos
+  const [selectedRepos, setSelectedRepos] = useState([])
+  const [repoSearch, setRepoSearch] = useState('')
+  
+  // Branches per repo
+  const [branchesMap, setBranchesMap] = useState({}) // { repoName: branches[] }
+  const [selectedBranchesMap, setSelectedBranchesMap] = useState({}) // { repoName: Set<branchName> }
+  const [branchSearch, setBranchSearch] = useState('')
+  const [loadingBranches, setLoadingBranches] = useState(false)
+  
+  // File tree (for first selected repo)
   const [repoTree, setRepoTree] = useState([])
   const [selectedPaths, setSelectedPaths] = useState(new Set())
+  const [loadingTree, setLoadingTree] = useState(false)
   
   // Search
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [loadingBranches, setLoadingBranches] = useState(false)
-  const [loadingTree, setLoadingTree] = useState(false)
   const [error, setError] = useState(null)
-  
-  // Filters
   const [language, setLanguage] = useState('')
   const [extension, setExtension] = useState('')
-  const [repoSearch, setRepoSearch] = useState('')
 
-  // Filter repos by search
+  // Filter repos
   const filteredRepos = allRepos.filter(repo => 
     repo.name.toLowerCase().includes(repoSearch.toLowerCase())
   )
 
-  // Load branches when repo selected
-  const handleSelectRepo = async (repo) => {
-    setSelectedRepo(repo)
-    setSelectedBranches(new Set())
-    setBranches([])
-    setRepoTree([])
-    setSelectedPaths(new Set())
-    setResults(null)
-    setStep(2)
-    
-    setLoadingBranches(true)
-    try {
-      const branchList = await fetchBranches(token, org, repo.name)
-      setBranches(branchList)
-      // Auto-select default branch
-      const defaultBranch = branchList.find(b => b.name === repo.defaultBranch) || branchList[0]
-      if (defaultBranch) {
-        setSelectedBranches(new Set([defaultBranch.name]))
+  // Toggle repo selection
+  const handleToggleRepo = (repo) => {
+    setSelectedRepos(prev => {
+      const exists = prev.find(r => r.name === repo.name)
+      if (exists) {
+        return prev.filter(r => r.name !== repo.name)
       }
-    } catch (e) {
-      setError('Failed to load branches')
-    } finally {
-      setLoadingBranches(false)
+      return [...prev, repo]
+    })
+  }
+
+  const handleSelectAllRepos = () => {
+    if (selectedRepos.length === filteredRepos.length) {
+      setSelectedRepos([])
+    } else {
+      setSelectedRepos([...filteredRepos])
     }
   }
 
-  // Load tree when branches confirmed
+  // Load branches for selected repos
+  const handleConfirmRepos = async () => {
+    if (selectedRepos.length === 0) return
+    
+    setStep(2)
+    setLoadingBranches(true)
+    
+    const newBranchesMap = {}
+    const newSelectedBranchesMap = {}
+    
+    for (const repo of selectedRepos) {
+      try {
+        const branches = await fetchBranches(token, org, repo.name)
+        newBranchesMap[repo.name] = branches
+        // Auto-select default branch
+        const defaultBranch = branches.find(b => b.name === repo.defaultBranch) || branches[0]
+        newSelectedBranchesMap[repo.name] = new Set(defaultBranch ? [defaultBranch.name] : [])
+      } catch (e) {
+        console.error(`Failed to load branches for ${repo.name}:`, e)
+        newBranchesMap[repo.name] = []
+        newSelectedBranchesMap[repo.name] = new Set()
+      }
+    }
+    
+    setBranchesMap(newBranchesMap)
+    setSelectedBranchesMap(newSelectedBranchesMap)
+    setLoadingBranches(false)
+  }
+
+  // Toggle branch for a repo
+  const handleToggleBranch = (repoName, branchName) => {
+    setSelectedBranchesMap(prev => {
+      const repoSet = new Set(prev[repoName] || [])
+      if (repoSet.has(branchName)) {
+        repoSet.delete(branchName)
+      } else {
+        repoSet.add(branchName)
+      }
+      return { ...prev, [repoName]: repoSet }
+    })
+  }
+
+  const handleSelectAllBranchesForRepo = (repoName) => {
+    const branches = branchesMap[repoName] || []
+    const currentSelected = selectedBranchesMap[repoName] || new Set()
+    
+    if (currentSelected.size === branches.length) {
+      setSelectedBranchesMap(prev => ({ ...prev, [repoName]: new Set() }))
+    } else {
+      setSelectedBranchesMap(prev => ({ 
+        ...prev, 
+        [repoName]: new Set(branches.map(b => b.name)) 
+      }))
+    }
+  }
+
+  // Get total selected branches
+  const totalSelectedBranches = Object.values(selectedBranchesMap).reduce(
+    (sum, set) => sum + set.size, 0
+  )
+
+  // Filter branches by search
+  const getFilteredBranches = (repoName) => {
+    const branches = branchesMap[repoName] || []
+    if (!branchSearch) return branches
+    return branches.filter(b => 
+      b.name.toLowerCase().includes(branchSearch.toLowerCase())
+    )
+  }
+
+  // Load file tree
   const handleConfirmBranches = async () => {
-    if (selectedBranches.size === 0) return
+    if (totalSelectedBranches === 0) return
     
     setStep(3)
     setLoadingTree(true)
     
-    try {
-      const branch = Array.from(selectedBranches)[0] // Use first selected branch for tree
-      const tree = await fetchRepoTree(token, org, selectedRepo.name, branch)
-      setRepoTree(tree)
-    } catch (e) {
-      console.error('Failed to load tree:', e)
-      setRepoTree([])
-    } finally {
-      setLoadingTree(false)
-    }
-  }
-
-  // Toggle branch selection
-  const handleToggleBranch = (branchName) => {
-    setSelectedBranches(prev => {
-      const next = new Set(prev)
-      if (next.has(branchName)) {
-        next.delete(branchName)
-      } else {
-        next.add(branchName)
+    // Load tree for first repo's first selected branch
+    const firstRepo = selectedRepos[0]
+    const firstBranch = Array.from(selectedBranchesMap[firstRepo.name] || [])[0]
+    
+    if (firstRepo && firstBranch) {
+      try {
+        const tree = await fetchRepoTree(token, org, firstRepo.name, firstBranch)
+        setRepoTree(tree)
+      } catch (e) {
+        setRepoTree([])
       }
-      return next
-    })
-  }
-
-  const handleSelectAllBranches = () => {
-    if (selectedBranches.size === branches.length) {
-      setSelectedBranches(new Set())
-    } else {
-      setSelectedBranches(new Set(branches.map(b => b.name)))
     }
+    
+    setLoadingTree(false)
   }
 
   // Toggle path selection
@@ -269,7 +370,6 @@ export function CodeSearch({ token, org, allRepos }) {
       
       if (next.has(path)) {
         next.delete(path)
-        // If folder, also remove all children
         if (isFolder && node.children) {
           const removeChildren = (n) => {
             next.delete(n.path)
@@ -279,7 +379,6 @@ export function CodeSearch({ token, org, allRepos }) {
         }
       } else {
         next.add(path)
-        // If folder, also add all children
         if (isFolder && node.children) {
           const addChildren = (n) => {
             next.add(n.path)
@@ -298,6 +397,18 @@ export function CodeSearch({ token, org, allRepos }) {
     setStep(4)
   }
 
+  // Build search scope summary
+  const getSearchScope = () => {
+    const repos = selectedRepos.map(r => r.name)
+    const branches = []
+    for (const [repo, branchSet] of Object.entries(selectedBranchesMap)) {
+      for (const branch of branchSet) {
+        branches.push(`${repo}:${branch}`)
+      }
+    }
+    return { repos, branches, paths: Array.from(selectedPaths) }
+  }
+
   // Perform search
   const handleSearch = async (e) => {
     e?.preventDefault()
@@ -307,15 +418,33 @@ export function CodeSearch({ token, org, allRepos }) {
     setError(null)
     
     try {
-      const searchResults = await searchCode(token, query, org, selectedRepo?.name, {
-        branches: Array.from(selectedBranches),
-        paths: Array.from(selectedPaths).filter(p => !p.includes('/')).length > 0 
-          ? Array.from(selectedPaths) 
-          : [],
-        language: language || undefined,
-        extension: extension || undefined,
+      // Search across all selected repos
+      const allResults = []
+      
+      for (const repo of selectedRepos) {
+        const repoBranches = Array.from(selectedBranchesMap[repo.name] || [])
+        
+        // GitHub Search API searches default branch, but we'll include branch context
+        const searchResults = await searchCode(token, query, org, repo.name, {
+          branches: repoBranches,
+          paths: Array.from(selectedPaths),
+          language: language || undefined,
+          extension: extension || undefined,
+        })
+        
+        // Add branch info to results
+        searchResults.items.forEach(item => {
+          item.searchedBranches = repoBranches
+        })
+        
+        allResults.push(...searchResults.items)
+      }
+      
+      setResults({
+        totalCount: allResults.length,
+        items: allResults,
+        incompleteResults: false,
       })
-      setResults(searchResults)
     } catch (err) {
       setError(err.message)
       setResults(null)
@@ -324,12 +453,12 @@ export function CodeSearch({ token, org, allRepos }) {
     }
   }
 
-  // Reset all
+  // Reset
   const handleReset = () => {
     setStep(1)
-    setSelectedRepo(null)
-    setBranches([])
-    setSelectedBranches(new Set())
+    setSelectedRepos([])
+    setBranchesMap({})
+    setSelectedBranchesMap({})
     setRepoTree([])
     setSelectedPaths(new Set())
     setQuery('')
@@ -337,6 +466,8 @@ export function CodeSearch({ token, org, allRepos }) {
     setError(null)
     setLanguage('')
     setExtension('')
+    setRepoSearch('')
+    setBranchSearch('')
   }
 
   return (
@@ -353,7 +484,7 @@ export function CodeSearch({ token, org, allRepos }) {
                 Code Search
               </h2>
               <p className="text-sm text-frost-300/60">
-                Search across repositories like your IDE
+                Multi-repo, multi-branch search
               </p>
             </div>
           </div>
@@ -371,74 +502,104 @@ export function CodeSearch({ token, org, allRepos }) {
 
         {/* Progress Steps */}
         <div className="flex items-center justify-between mb-8">
-          <StepIndicator step={1} currentStep={step} label="Repository" icon={Folder} />
+          <StepIndicator step={1} currentStep={step} label="Repositories" icon={Folder} />
           <ArrowRight className="w-4 h-4 text-frost-300/20" />
           <StepIndicator step={2} currentStep={step} label="Branches" icon={GitBranch} />
           <ArrowRight className="w-4 h-4 text-frost-300/20" />
-          <StepIndicator step={3} currentStep={step} label="Files (optional)" icon={FolderTree} />
+          <StepIndicator step={3} currentStep={step} label="Files" icon={FolderTree} />
           <ArrowRight className="w-4 h-4 text-frost-300/20" />
           <StepIndicator step={4} currentStep={step} label="Search" icon={Search} />
         </div>
 
-        {/* Step 1: Repository Selection */}
+        {/* Step 1: Repository Selection (Multi) */}
         {step === 1 && (
           <div className="space-y-4">
-            <input
-              type="text"
-              value={repoSearch}
-              onChange={(e) => setRepoSearch(e.target.value)}
-              placeholder="Search repositories..."
-              className="w-full px-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-electric-400/50 transition-all"
-            />
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-80 overflow-y-auto">
-              {filteredRepos.map(repo => (
-                <button
-                  key={repo.name}
-                  onClick={() => handleSelectRepo(repo)}
-                  className="flex items-start gap-3 p-4 bg-void-700/30 hover:bg-void-700/50 border border-void-600/50 hover:border-electric-400/30 rounded-xl transition-all text-left group"
-                >
-                  <Folder className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                  <div className="min-w-0">
-                    <h3 className="font-medium text-frost-100 truncate group-hover:text-electric-400 transition-colors">
-                      {repo.name}
-                    </h3>
-                    {repo.description && (
-                      <p className="text-xs text-frost-300/60 truncate mt-1">
-                        {repo.description}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs px-2 py-0.5 bg-void-600/50 rounded text-frost-300/60">
-                        {repo.defaultBranch}
-                      </span>
-                      {repo.private && (
-                        <span className="text-xs px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
-                          Private
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-frost-300/40" />
+                <input
+                  type="text"
+                  value={repoSearch}
+                  onChange={(e) => setRepoSearch(e.target.value)}
+                  placeholder="Search repositories..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-electric-400/50 transition-all"
+                />
+              </div>
+              <button
+                onClick={handleSelectAllRepos}
+                className="px-4 py-2.5 text-sm text-electric-400 hover:text-electric-500 hover:bg-electric-400/10 rounded-xl transition-all"
+              >
+                {selectedRepos.length === filteredRepos.length ? 'Clear all' : 'Select all'}
+              </button>
             </div>
+
+            <div className="text-sm text-frost-300/60 mb-2">
+              {selectedRepos.length} of {filteredRepos.length} repositories selected
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+              {filteredRepos.map(repo => {
+                const isSelected = selectedRepos.some(r => r.name === repo.name)
+                return (
+                  <button
+                    key={repo.name}
+                    onClick={() => handleToggleRepo(repo)}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                      isSelected
+                        ? 'bg-electric-400/10 border-electric-400/50'
+                        : 'bg-void-700/30 border-void-600/50 hover:border-frost-300/30'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                      isSelected ? 'bg-electric-400 border-electric-400' : 'border-frost-300/30'
+                    }`}>
+                      {isSelected && <Check className="w-3 h-3 text-void-900" />}
+                    </div>
+                    <Folder className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-electric-400' : 'text-yellow-400'}`} />
+                    <span className={`text-sm truncate ${isSelected ? 'text-electric-400' : 'text-frost-200'}`}>
+                      {repo.name}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <button
+              onClick={handleConfirmRepos}
+              disabled={selectedRepos.length === 0}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Continue with {selectedRepos.length} repo{selectedRepos.length !== 1 ? 's' : ''}
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         )}
 
-        {/* Step 2: Branch Selection */}
+        {/* Step 2: Branch Selection (Multi per repo) */}
         {step === 2 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Folder className="w-5 h-5 text-yellow-400" />
-                <span className="font-medium text-frost-100">{selectedRepo?.name}</span>
-              </div>
+              <span className="text-sm text-frost-300/60">
+                {totalSelectedBranches} branches selected across {selectedRepos.length} repos
+              </span>
               <button
                 onClick={() => setStep(1)}
                 className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors"
               >
-                Change repo
+                Change repos
               </button>
+            </div>
+
+            {/* Branch search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-frost-300/40" />
+              <input
+                type="text"
+                value={branchSearch}
+                onChange={(e) => setBranchSearch(e.target.value)}
+                placeholder="Search branches..."
+                className="w-full pl-10 pr-4 py-2.5 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-electric-400/50 transition-all"
+              />
             </div>
 
             {loadingBranches ? (
@@ -446,51 +607,59 @@ export function CodeSearch({ token, org, allRepos }) {
                 <Loader2 className="w-8 h-8 text-electric-400 animate-spin" />
               </div>
             ) : (
-              <>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-frost-300/60">
-                    Select branches ({selectedBranches.size} of {branches.length})
-                  </span>
-                  <button
-                    onClick={handleSelectAllBranches}
-                    className="text-sm text-electric-400 hover:text-electric-500 transition-colors"
-                  >
-                    {selectedBranches.size === branches.length ? 'Clear all' : 'Select all'}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-60 overflow-y-auto">
-                  {branches.map(branch => (
-                    <button
-                      key={branch.name}
-                      onClick={() => handleToggleBranch(branch.name)}
-                      className={`flex items-center gap-2 p-3 rounded-lg border transition-all ${
-                        selectedBranches.has(branch.name)
-                          ? 'bg-electric-400/10 border-electric-400/50 text-electric-400'
-                          : 'bg-void-700/30 border-void-600/50 text-frost-300/60 hover:border-frost-300/30'
-                      }`}
-                    >
-                      <div className={`w-4 h-4 rounded border flex items-center justify-center ${
-                        selectedBranches.has(branch.name) ? 'bg-electric-400 border-electric-400' : 'border-current'
-                      }`}>
-                        {selectedBranches.has(branch.name) && <Check className="w-3 h-3 text-void-900" />}
+              <div className="space-y-4 max-h-64 overflow-y-auto">
+                {selectedRepos.map(repo => {
+                  const branches = getFilteredBranches(repo.name)
+                  const selected = selectedBranchesMap[repo.name] || new Set()
+                  
+                  return (
+                    <div key={repo.name} className="bg-void-700/30 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Folder className="w-4 h-4 text-yellow-400" />
+                          <span className="font-medium text-frost-100">{repo.name}</span>
+                          <span className="text-xs text-frost-300/60">
+                            ({selected.size}/{branches.length})
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleSelectAllBranchesForRepo(repo.name)}
+                          className="text-xs text-electric-400 hover:text-electric-500 transition-colors"
+                        >
+                          {selected.size === branches.length ? 'Clear' : 'Select all'}
+                        </button>
                       </div>
-                      <GitBranch className="w-4 h-4 flex-shrink-0" />
-                      <span className="text-sm truncate">{branch.name}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  onClick={handleConfirmBranches}
-                  disabled={selectedBranches.size === 0}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Continue
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        {branches.map(branch => (
+                          <button
+                            key={branch.name}
+                            onClick={() => handleToggleBranch(repo.name, branch.name)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all ${
+                              selected.has(branch.name)
+                                ? 'bg-electric-400/20 text-electric-400 border border-electric-400/30'
+                                : 'bg-void-600/50 text-frost-300/60 border border-void-600/50 hover:border-frost-300/30'
+                            }`}
+                          >
+                            <GitBranch className="w-3 h-3" />
+                            {branch.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
+
+            <button
+              onClick={handleConfirmBranches}
+              disabled={totalSelectedBranches === 0}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Continue
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -498,18 +667,9 @@ export function CodeSearch({ token, org, allRepos }) {
         {step === 3 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Folder className="w-5 h-5 text-yellow-400" />
-                  <span className="font-medium text-frost-100">{selectedRepo?.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-electric-400" />
-                  <span className="text-sm text-electric-400">
-                    {selectedBranches.size} branch{selectedBranches.size !== 1 ? 'es' : ''}
-                  </span>
-                </div>
-              </div>
+              <span className="text-sm text-frost-300/60">
+                Select files/folders to narrow search (optional)
+              </span>
               <button
                 onClick={() => setStep(2)}
                 className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors"
@@ -524,6 +684,12 @@ export function CodeSearch({ token, org, allRepos }) {
               </div>
             ) : (
               <>
+                {selectedRepos.length > 1 && (
+                  <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl text-sm text-yellow-400">
+                    File tree shown for: {selectedRepos[0].name}. Path filters will apply to all repos.
+                  </div>
+                )}
+                
                 <FileTree
                   tree={repoTree}
                   selectedPaths={selectedPaths}
@@ -554,24 +720,24 @@ export function CodeSearch({ token, org, allRepos }) {
         {step === 4 && (
           <div className="space-y-4">
             {/* Context summary */}
-            <div className="flex flex-wrap items-center gap-2 p-3 bg-void-700/30 rounded-xl">
-              <span className="text-sm text-frost-300/60">Searching in:</span>
-              <span className="px-2 py-1 bg-yellow-400/20 text-yellow-400 rounded text-sm font-medium">
-                {selectedRepo?.name}
+            <div className="flex flex-wrap items-center gap-2 p-3 bg-void-700/30 rounded-xl text-sm">
+              <span className="text-frost-300/60">Scope:</span>
+              <span className="px-2 py-1 bg-yellow-400/20 text-yellow-400 rounded font-medium">
+                {selectedRepos.length} repo{selectedRepos.length !== 1 ? 's' : ''}
               </span>
-              <span className="px-2 py-1 bg-electric-400/20 text-electric-400 rounded text-sm">
-                {selectedBranches.size} branch{selectedBranches.size !== 1 ? 'es' : ''}
+              <span className="px-2 py-1 bg-electric-400/20 text-electric-400 rounded">
+                {totalSelectedBranches} branch{totalSelectedBranches !== 1 ? 'es' : ''}
               </span>
               {selectedPaths.size > 0 && (
-                <span className="px-2 py-1 bg-neon-pink/20 text-neon-pink rounded text-sm">
+                <span className="px-2 py-1 bg-neon-pink/20 text-neon-pink rounded">
                   {selectedPaths.size} path{selectedPaths.size !== 1 ? 's' : ''}
                 </span>
               )}
               <button
-                onClick={() => setStep(3)}
+                onClick={() => setStep(1)}
                 className="ml-auto text-xs text-frost-300/60 hover:text-frost-200 transition-colors"
               >
-                Modify scope
+                Modify
               </button>
             </div>
 
@@ -599,7 +765,6 @@ export function CodeSearch({ token, org, allRepos }) {
                 </button>
               </div>
 
-              {/* Additional filters */}
               <div className="flex gap-3">
                 <select
                   value={language}
@@ -642,10 +807,7 @@ export function CodeSearch({ token, org, allRepos }) {
           <div className="flex items-center justify-between">
             <h3 className="text-frost-200 font-medium flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-neon-pink" />
-              {results.totalCount.toLocaleString()} results found
-              {results.incompleteResults && (
-                <span className="text-xs text-frost-300/60">(may be incomplete)</span>
-              )}
+              {results.totalCount.toLocaleString()} results
             </h3>
           </div>
 
@@ -662,7 +824,7 @@ export function CodeSearch({ token, org, allRepos }) {
                   result={result}
                   token={token}
                   org={org}
-                  selectedBranch={Array.from(selectedBranches)[0]}
+                  selectedBranches={result.searchedBranches || []}
                 />
               ))}
             </div>

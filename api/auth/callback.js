@@ -1,16 +1,25 @@
 // Vercel Serverless Function: Handle OAuth callback and exchange code for token
 export default async function handler(req, res) {
-  const { code } = req.query
+  const { code, error: oauthError } = req.query
+
+  // Determine base URL for redirect
+  const protocol = req.headers['x-forwarded-proto'] || 'https'
+  const host = req.headers['x-forwarded-host'] || req.headers.host
+  const baseUrl = `${protocol}://${host}`
+
+  if (oauthError) {
+    return res.redirect(`${baseUrl}/?error=${oauthError}`)
+  }
 
   if (!code) {
-    return res.redirect('/?error=no_code')
+    return res.redirect(`${baseUrl}/?error=no_code`)
   }
 
   const clientId = process.env.GITHUB_CLIENT_ID
   const clientSecret = process.env.GITHUB_CLIENT_SECRET
 
   if (!clientId || !clientSecret) {
-    return res.redirect('/?error=missing_config')
+    return res.redirect(`${baseUrl}/?error=missing_config`)
   }
 
   try {
@@ -32,7 +41,7 @@ export default async function handler(req, res) {
 
     if (tokenData.error) {
       console.error('OAuth error:', tokenData)
-      return res.redirect(`/?error=${tokenData.error}`)
+      return res.redirect(`${baseUrl}/?error=${tokenData.error}`)
     }
 
     const accessToken = tokenData.access_token
@@ -42,6 +51,7 @@ export default async function handler(req, res) {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'GitPulse-Dashboard',
       },
     })
 
@@ -52,13 +62,13 @@ export default async function handler(req, res) {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'GitPulse-Dashboard',
       },
     })
 
     const orgs = await orgsResponse.json()
 
-    // Redirect back to app with token and user info in URL hash (client-side only)
-    // Using hash so it's not sent to server in subsequent requests
+    // Redirect back to app with token and user info in URL parameter
     const authData = {
       token: accessToken,
       user: {
@@ -67,19 +77,18 @@ export default async function handler(req, res) {
         avatar_url: user.avatar_url,
         id: user.id,
       },
-      orgs: orgs.map(o => ({
+      orgs: Array.isArray(orgs) ? orgs.map(o => ({
         login: o.login,
         avatar_url: o.avatar_url,
-      })),
+      })) : [],
     }
 
     // Encode and redirect
     const encoded = Buffer.from(JSON.stringify(authData)).toString('base64')
-    res.redirect(`/?auth=${encoded}`)
+    res.redirect(`${baseUrl}/?auth=${encoded}`)
     
   } catch (error) {
     console.error('OAuth callback error:', error)
-    res.redirect(`/?error=callback_failed`)
+    res.redirect(`${baseUrl}/?error=callback_failed`)
   }
 }
-

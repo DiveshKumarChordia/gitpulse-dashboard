@@ -3,10 +3,15 @@ export default function handler(req, res) {
   const clientId = process.env.GITHUB_CLIENT_ID
   
   if (!clientId) {
-    return res.status(500).json({ error: 'GitHub Client ID not configured' })
+    return res.status(500).json({ error: 'GitHub Client ID not configured. Add GITHUB_CLIENT_ID to environment variables.' })
   }
 
-  const redirectUri = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/auth/callback`
+  // Determine the base URL
+  const protocol = req.headers['x-forwarded-proto'] || 'https'
+  const host = req.headers['x-forwarded-host'] || req.headers.host
+  const baseUrl = `${protocol}://${host}`
+  
+  const redirectUri = `${baseUrl}/api/auth/callback`
   
   // Scopes needed: repo (for private repos), read:org (for org membership), read:user
   const scope = 'repo read:org read:user'
@@ -15,4 +20,3 @@ export default function handler(req, res) {
   
   res.redirect(302, githubAuthUrl)
 }
-
