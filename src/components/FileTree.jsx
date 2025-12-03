@@ -1,29 +1,10 @@
 import { useState } from 'react'
-import { ChevronRight, ChevronDown, Folder, FolderOpen, FileCode, FileText, File, Check } from 'lucide-react'
+import { ChevronRight, ChevronDown, Folder, FolderOpen, FileCode, Check } from 'lucide-react'
 
 const FILE_ICONS = {
-  js: '🟨',
-  jsx: '⚛️',
-  ts: '🔷',
-  tsx: '⚛️',
-  py: '🐍',
-  rb: '💎',
-  go: '🔵',
-  rs: '🦀',
-  java: '☕',
-  kt: '🟣',
-  swift: '🍎',
-  php: '🐘',
-  html: '🌐',
-  css: '🎨',
-  scss: '🎨',
-  json: '📋',
-  yaml: '📋',
-  yml: '📋',
-  md: '📝',
-  sql: '🗃️',
-  sh: '🖥️',
-  dockerfile: '🐳',
+  js: '🟨', jsx: '⚛️', ts: '🔷', tsx: '⚛️', py: '🐍', rb: '💎', go: '🔵', rs: '🦀',
+  java: '☕', kt: '🟣', swift: '🍎', php: '🐘', html: '🌐', css: '🎨', scss: '🎨',
+  json: '📋', yaml: '📋', yml: '📋', md: '📝', sql: '🗃️', sh: '🖥️', dockerfile: '🐳',
 }
 
 function getFileIcon(name) {
@@ -42,9 +23,7 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
 
   const handleClick = (e) => {
     e.stopPropagation()
-    if (isFolder) {
-      onToggleFolder(node.path)
-    }
+    if (isFolder) onToggleFolder(node.path)
   }
 
   const handleSelect = (e) => {
@@ -57,65 +36,40 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
   return (
     <div>
       <div 
-        className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer transition-all group ${
-          isSelected 
-            ? 'bg-electric-400/20 text-electric-400' 
-            : hasSelectedChildren
-              ? 'bg-electric-400/10'
-              : 'hover:bg-void-600/50'
+        className={`flex items-center gap-2 py-1 px-2 rounded-lg cursor-pointer transition-all group ${
+          isSelected ? 'bg-electric-400/20 text-electric-400' : hasSelectedChildren ? 'bg-electric-400/10' : 'hover:bg-void-600/50'
         }`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{ paddingLeft: `${depth * 12 + 4}px` }}
         onClick={handleClick}
       >
-        {/* Expand/Collapse icon for folders */}
         {isFolder ? (
           <button className="p-0.5 hover:bg-void-500/50 rounded transition-colors">
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-frost-300/60" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-frost-300/60" />
-            )}
+            {isExpanded ? <ChevronDown className="w-3 h-3 text-frost-300/60" /> : <ChevronRight className="w-3 h-3 text-frost-300/60" />}
           </button>
-        ) : (
-          <span className="w-5" />
-        )}
+        ) : <span className="w-4" />}
 
-        {/* Checkbox */}
         <button
           onClick={handleSelect}
-          className={`flex-shrink-0 w-4 h-4 rounded border transition-all ${
-            isSelected 
-              ? 'bg-electric-400 border-electric-400' 
-              : hasSelectedChildren
-                ? 'bg-electric-400/30 border-electric-400/50'
-                : 'border-frost-300/30 hover:border-electric-400/50'
+          className={`flex-shrink-0 w-3.5 h-3.5 rounded border transition-all ${
+            isSelected ? 'bg-electric-400 border-electric-400' : hasSelectedChildren ? 'bg-electric-400/30 border-electric-400/50' : 'border-frost-300/30 hover:border-electric-400/50'
           }`}
         >
-          {(isSelected || hasSelectedChildren) && (
-            <Check className="w-3 h-3 text-void-900 mx-auto" />
-          )}
+          {(isSelected || hasSelectedChildren) && <Check className="w-2.5 h-2.5 text-void-900 mx-auto" />}
         </button>
 
-        {/* Icon */}
         {isFolder ? (
-          isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-          ) : (
-            <Folder className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-          )
+          isExpanded ? <FolderOpen className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" /> : <Folder className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
         ) : fileIcon ? (
-          <span className="text-sm flex-shrink-0">{fileIcon}</span>
+          <span className="text-xs flex-shrink-0">{fileIcon}</span>
         ) : (
-          <FileCode className="w-4 h-4 text-frost-300/60 flex-shrink-0" />
+          <FileCode className="w-3.5 h-3.5 text-frost-300/60 flex-shrink-0" />
         )}
 
-        {/* Name */}
-        <span className={`text-sm truncate ${isFolder ? 'font-medium text-frost-100' : 'text-frost-200'}`}>
+        <span className={`text-xs truncate ${isFolder ? 'font-medium text-frost-100' : 'text-frost-200'}`}>
           {node.name}
         </span>
       </div>
 
-      {/* Children */}
       {isFolder && isExpanded && node.children && (
         <div>
           {node.children.map((child) => (
@@ -141,11 +95,8 @@ export function FileTree({ tree, selectedPaths, onSelect }) {
   const handleToggleFolder = (path) => {
     setExpandedFolders(prev => {
       const next = new Set(prev)
-      if (next.has(path)) {
-        next.delete(path)
-      } else {
-        next.add(path)
-      }
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
       return next
     })
   }
@@ -164,37 +115,23 @@ export function FileTree({ tree, selectedPaths, onSelect }) {
     setExpandedFolders(allFolders)
   }
 
-  const handleCollapseAll = () => {
-    setExpandedFolders(new Set())
-  }
+  const handleCollapseAll = () => setExpandedFolders(new Set())
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between px-2">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-1 mb-2">
         <span className="text-xs text-frost-300/60">
-          {selectedPaths.size > 0 ? `${selectedPaths.size} selected` : 'Select files/folders (optional)'}
+          {selectedPaths.size > 0 ? `${selectedPaths.size} selected` : 'Optional'}
         </span>
         <div className="flex gap-2">
-          <button
-            onClick={handleExpandAll}
-            className="text-xs text-electric-400 hover:text-electric-500 transition-colors"
-          >
-            Expand all
-          </button>
-          <button
-            onClick={handleCollapseAll}
-            className="text-xs text-frost-300/60 hover:text-frost-200 transition-colors"
-          >
-            Collapse
-          </button>
+          <button onClick={handleExpandAll} className="text-xs text-electric-400 hover:text-electric-500 transition-colors">Expand</button>
+          <button onClick={handleCollapseAll} className="text-xs text-frost-300/60 hover:text-frost-200 transition-colors">Collapse</button>
         </div>
       </div>
       
-      <div className="max-h-80 overflow-y-auto border border-void-600/50 rounded-xl bg-void-800/50 p-2">
+      <div className="flex-1 overflow-y-auto border border-void-600/50 rounded-lg bg-void-800/50 p-1.5 max-h-52">
         {tree.length === 0 ? (
-          <div className="text-center py-8 text-frost-300/40 text-sm">
-            No files found
-          </div>
+          <div className="text-center py-6 text-frost-300/40 text-xs">No files</div>
         ) : (
           tree.map((node) => (
             <TreeNode
@@ -211,4 +148,3 @@ export function FileTree({ tree, selectedPaths, onSelect }) {
     </div>
   )
 }
-
