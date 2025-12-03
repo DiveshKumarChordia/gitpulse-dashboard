@@ -1,6 +1,6 @@
 import { Loader2, GitCommit, GitPullRequest, Folders } from 'lucide-react'
 
-export function LoadingState() {
+export function LoadingState({ progress }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <div className="relative mb-8">
@@ -17,9 +17,26 @@ export function LoadingState() {
         Loading your activity...
       </h3>
       
-      <p className="text-frost-300/60 max-w-md mb-8">
+      <p className="text-frost-300/60 max-w-md mb-4">
         Fetching commits and pull requests from your repositories
       </p>
+      
+      {/* Progress indicator */}
+      {progress && (
+        <div className="w-64 mb-8">
+          <div className="flex justify-between text-xs text-frost-300/60 mb-2">
+            <span>Scanning repositories</span>
+            <span>{progress.processed} / {progress.total}</span>
+          </div>
+          <div className="h-2 bg-void-700/50 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-electric-400 to-electric-500 rounded-full transition-all duration-300"
+              style={{ width: `${progress.percentage}%` }}
+            />
+          </div>
+          <p className="text-xs text-electric-400 mt-2">{progress.percentage}% complete</p>
+        </div>
+      )}
       
       {/* Animated loading items */}
       <div className="flex gap-4">
@@ -41,4 +58,3 @@ export function LoadingState() {
     </div>
   )
 }
-
