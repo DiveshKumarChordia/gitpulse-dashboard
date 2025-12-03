@@ -9,9 +9,10 @@ import { HeatMap } from './components/HeatMap'
 import { CodeSearch } from './components/CodeSearch'
 import { EmptyState } from './components/EmptyState'
 import { LoadingState } from './components/LoadingState'
+import { ToastProvider } from './components/Toast'
 import { fetchUserActivities, fetchAllOrgRepos } from './api/github'
 
-function App() {
+function AppContent() {
   const [config, setConfig] = useState(() => {
     const saved = localStorage.getItem('github-dashboard-config')
     return saved ? JSON.parse(saved) : null
@@ -297,6 +298,14 @@ function App() {
         />
       )}
     </div>
+  )
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   )
 }
 
