@@ -1,105 +1,129 @@
 # GitPulse - GitHub Activity Dashboard
 
-A beautiful, modern dashboard to track all your GitHub commits and pull requests across multiple repositories in your organization.
+A beautiful, modern dashboard to track all your GitHub commits and pull requests across multiple repositories in your organization. Features **OAuth login** and **IDE-like code search**.
 
-![GitPulse Dashboard](https://via.placeholder.com/800x400?text=GitPulse+Dashboard)
+## ✨ Features
 
-## Features
+### 📊 Activity Dashboard
+- **Unified Activity Timeline** - View all your commits and PRs in a single, chronological timeline
+- **Activity Heatmap** - GitHub-style contribution heatmap, click any day to filter
+- **Smart Filtering** - Filter by date, repositories, and activity type
+- **Direct Navigation** - Click any activity to open it on GitHub
 
-✨ **Unified Activity Timeline** - View all your commits and PRs in a single, chronological timeline
+### 🔍 Code Search (NEW!)
+- **IDE-like Search** - Search for code across ALL your org's repositories
+- **File Preview** - Expand to see file contents without leaving the app
+- **Advanced Filters** - Filter by language, path, file extension
+- **Syntax Highlighting** - See exactly where your search matches
 
-🔍 **Smart Filtering** - Filter by:
-- Date range
-- Single or multiple repositories
-- Activity type (Commits, PRs, or both)
-- Search by message, repo, or branch
+### 🔐 Authentication
+- **OAuth Login** - One-click "Login with GitHub" (recommended)
+- **PAT Support** - Personal Access Token option for local/private use
+- **Secure** - Tokens stored locally, never sent to third parties
 
-📊 **Quick Stats** - At-a-glance metrics for commits, PRs, and active repositories
+## 🚀 Quick Start
 
-🔗 **Direct Navigation** - Click any activity to open it directly on GitHub
+### Option 1: Deploy to Vercel (Recommended)
 
-🎨 **Modern Design** - Beautiful dark theme with smooth animations and a unique aesthetic
+1. **Fork this repository** or push to your GitHub
 
-## Getting Started
+2. **Create a GitHub OAuth App**:
+   - Go to [GitHub Developer Settings](https://github.com/settings/developers)
+   - Click "New OAuth App"
+   - Fill in:
+     - **Application name**: GitPulse
+     - **Homepage URL**: `https://your-app.vercel.app`
+     - **Authorization callback URL**: `https://your-app.vercel.app/api/auth/callback`
+   - Click "Register application"
+   - Copy the **Client ID** and generate a **Client Secret**
 
-### Prerequisites
+3. **Deploy to Vercel**:
+   - Go to [vercel.com/new](https://vercel.com/new)
+   - Import your repository
+   - Add Environment Variables:
+     - `GITHUB_CLIENT_ID` = your Client ID
+     - `GITHUB_CLIENT_SECRET` = your Client Secret
+   - Deploy!
 
-- Node.js 18+ 
-- A GitHub Personal Access Token with the following scopes:
-  - `repo` - Access repositories
-  - `read:org` - Read organization membership
+### Option 2: Local Development
 
-### Installation
-
-1. Clone or download this project
-
-2. Install dependencies:
 ```bash
+# Clone the repo
+git clone https://github.com/DiveshKumarChordia/gitpulse-dashboard.git
+cd gitpulse-dashboard
+
+# Install dependencies
 npm install
-```
 
-3. Start the development server:
-```bash
+# Start dev server
 npm run dev
 ```
 
-4. Open http://localhost:5173 in your browser
-
-### Setup
-
-1. Create a GitHub Personal Access Token at https://github.com/settings/tokens/new
-   - Select scopes: `repo` and `read:org`
-   
-2. Enter your token in the setup modal when you first open the app
-
-3. Select your organization
-
-4. Start exploring your activity!
-
-## Building for Production
-
-```bash
-npm run build
+For local OAuth testing, create a `.env.local` file:
+```env
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
 ```
 
-The built files will be in the `dist` directory, ready to deploy to any static hosting service.
+And set your OAuth callback URL to `http://localhost:5173/api/auth/callback`
 
-## Deployment
+> **Note**: OAuth requires the Vercel dev server. Use `vercel dev` instead of `npm run dev` for full OAuth support locally, or use PAT authentication.
 
-### Vercel (Recommended)
+## 🔧 Tech Stack
 
-1. Push your code to GitHub
-2. Connect your repo to [Vercel](https://vercel.com)
-3. Deploy with default settings
+- **React 18** + **Vite** - Fast, modern frontend
+- **Tailwind CSS** - Beautiful styling
+- **Vercel Serverless** - OAuth token exchange
+- **GitHub API** - Search API for lightning-fast queries
+- **Lucide React** - Beautiful icons
 
-### Netlify
+## 📡 API Architecture
 
-1. Build the project: `npm run build`
-2. Drag the `dist` folder to [Netlify Drop](https://app.netlify.com/drop)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend (React)                      │
+├─────────────────────────────────────────────────────────────┤
+│  OAuth Login      │  Activity Feed    │  Code Search        │
+│  ────────────     │  ────────────     │  ────────────       │
+│  /api/auth/login  │  Search API       │  Search API         │
+│  /api/auth/callback│ (commits/PRs)    │  (code)             │
+└─────────────────────────────────────────────────────────────┘
+           │                    │                    │
+           ▼                    ▼                    ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│ Vercel Serverless│   │   GitHub API    │   │   GitHub API    │
+│ (token exchange) │   │  /search/commits│   │  /search/code   │
+└─────────────────┘   │  /search/issues │   └─────────────────┘
+                      └─────────────────┘
+```
 
-### GitHub Pages
+## 🔒 Security
 
-1. Build the project: `npm run build`
-2. Deploy the `dist` folder to GitHub Pages
+- **OAuth tokens** are exchanged server-side (client secret never exposed)
+- **Tokens stored** in browser's localStorage (never sent to our servers)
+- **Minimal scopes** - only requests `repo` and `read:org`
+- **No tracking** - zero analytics or third-party scripts
 
-## Tech Stack
+## 🆚 PAT vs OAuth
 
-- **React 18** - UI library
-- **Vite** - Build tool & dev server
-- **Tailwind CSS** - Styling
-- **Lucide React** - Icons
-- **date-fns** - Date formatting
-- **GitHub REST API** - Data fetching
+| Feature | Personal Access Token | OAuth |
+|---------|----------------------|-------|
+| Setup | Manual (create token) | One-click |
+| Security | Token visible to user | Token hidden |
+| Revocation | Manual in GitHub settings | Automatic |
+| Best for | Local/private use | Production apps |
 
-## Security Note
+## 🛠️ Environment Variables
 
-Your GitHub Personal Access Token is stored locally in your browser's localStorage. It's never sent to any server other than GitHub's API. For additional security, you can create a token with minimal permissions and revoke it anytime from your GitHub settings.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GITHUB_CLIENT_ID` | For OAuth | Your GitHub OAuth App Client ID |
+| `GITHUB_CLIENT_SECRET` | For OAuth | Your GitHub OAuth App Client Secret |
 
-## License
+## 📝 License
 
 MIT License - Feel free to use this for your own projects!
 
 ---
 
 Made with ⚡ by GitPulse
-

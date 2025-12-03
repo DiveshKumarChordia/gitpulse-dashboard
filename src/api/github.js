@@ -53,7 +53,7 @@ async function fetchWithAuth(url, token) {
   return response.json()
 }
 
-// ============ GRAPHQL API (FAST!) ============
+// ============ GRAPHQL API ============
 async function graphqlQuery(token, query, variables = {}) {
   const response = await fetch(GITHUB_GRAPHQL, {
     method: 'POST',
@@ -75,7 +75,7 @@ async function graphqlQuery(token, query, variables = {}) {
   return result.data
 }
 
-// Fetch repos with GraphQL (much faster than REST pagination)
+// Fetch repos with GraphQL
 async function fetchReposGraphQL(token, org, cursor = null) {
   const query = `
     query($org: String!, $cursor: String) {
@@ -99,97 +99,21 @@ async function fetchReposGraphQL(token, org, cursor = null) {
   return graphqlQuery(token, query, { org, cursor })
 }
 
-// Fetch user commits and PRs for a batch of repos in ONE request
-async function fetchActivitiesForReposBatch(token, org, username, repoNames) {
-  // Build dynamic query for multiple repos
-  const repoQueries = repoNames.map((name, i) => `
-    repo${i}: repository(owner: $org, name: "${name}") {
-      name
-      defaultBranchRef {
-        target {
-          ... on Commit {
-            history(first: 100, author: {id: $userId}) {
-              nodes {
-                oid
-                message
-                committedDate
-                url
-                author {
-                  name
-                  user {
-                    login
-                    avatarUrl
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-      pullRequests(first: 100, states: [OPEN, CLOSED, MERGED], orderBy: {field: CREATED_AT, direction: DESC}) {
-        nodes {
-          id
-          number
-          title
-          body
-          state
-          createdAt
-          updatedAt
-          closedAt
-          mergedAt
-          url
-          isDraft
-          author {
-            login
-            avatarUrl
-          }
-          headRefName
-          baseRefName
-          additions
-          deletions
-          changedFiles
-          comments {
-            totalCount
-          }
-          reviews {
-            totalCount
-          }
-          labels(first: 10) {
-            nodes {
-              name
-              color
-            }
-          }
-        }
-      }
-    }
-  `).join('\n')
-
-  const query = `
-    query($org: String!, $userId: ID!) {
-      ${repoQueries}
-    }
-  `
-  
-  return graphqlQuery(token, query, { org, userId: '' })
-}
-
-// Simpler approach: fetch commits via search API (VERY fast)
+// Fetch user commits via search API
 async function fetchUserCommitsSearch(token, org, username) {
-  // Search API can get all user commits across org in one call!
   const query = `author:${username} org:${org}`
   const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(query)}&sort=author-date&order=desc&per_page=100`
   
   const results = []
   let page = 1
-  const maxPages = 10 // Up to 1000 commits
+  const maxPages = 10
   
   while (page <= maxPages) {
     try {
       const response = await fetch(`${url}&page=${page}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github.cloak-preview+json', // Required for commit search
+          'Accept': 'application/vnd.github.cloak-preview+json',
         },
       })
       
@@ -209,7 +133,7 @@ async function fetchUserCommitsSearch(token, org, username) {
   return results
 }
 
-// Fetch user PRs via search API (VERY fast)  
+// Fetch user PRs via search API
 async function fetchUserPRsSearch(token, org, username) {
   const query = `author:${username} org:${org} is:pr`
   const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=created&order=desc&per_page=100`
@@ -243,6 +167,117 @@ async function fetchUserPRsSearch(token, org, username) {
   return results
 }
 
+// ============ CODE SEARCH ============
+export async function searchCode(token, query, org, repos = [], options = {}) {
+  const { language, path, extension } = options
+  
+  // Build search query
+  let searchQuery = query
+  
+  // Add org filter
+  if (org) {
+    searchQuery += ` org:${org}`
+  }
+  
+  // Add repo filters
+  if (repos.length > 0) {
+    // GitHub search allows up to 100 repos in query
+    const repoFilters = repos.slice(0, 10).map(r => `repo:${org}/${r}`).join(' ')
+    searchQuery += ` ${repoFilters}`
+  }
+  
+  // Add language filter
+  if (language) {
+    searchQuery += ` language:${language}`
+  }
+  
+  // Add path filter
+  if (path) {
+    searchQuery += ` path:${path}`
+  }
+  
+  // Add extension filter
+  if (extension) {
+    searchQuery += ` extension:${extension}`
+  }
+  
+  const url = `${GITHUB_API_BASE}/search/code?q=${encodeURIComponent(searchQuery)}&per_page=100`
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3.text-match+json', // Get text match highlights
+      },
+    })
+    
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error('Rate limit exceeded. Please wait a moment.')
+      }
+      if (response.status === 422) {
+        throw new Error('Search query too complex. Try simpler terms.')
+      }
+      throw new Error(`Search failed: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Process results
+    return {
+      totalCount: data.total_count,
+      incompleteResults: data.incomplete_results,
+      items: data.items.map(item => ({
+        name: item.name,
+        path: item.path,
+        sha: item.sha,
+        url: item.html_url,
+        repository: {
+          name: item.repository.name,
+          fullName: item.repository.full_name,
+          url: item.repository.html_url,
+          private: item.repository.private,
+        },
+        // Text matches show where the query was found
+        textMatches: item.text_matches?.map(match => ({
+          fragment: match.fragment,
+          matches: match.matches?.map(m => ({
+            text: m.text,
+            indices: m.indices,
+          })),
+        })) || [],
+      })),
+    }
+  } catch (error) {
+    console.error('Code search error:', error)
+    throw error
+  }
+}
+
+// Get file content
+export async function getFileContent(token, owner, repo, path) {
+  try {
+    const response = await fetch(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3.raw',
+        },
+      }
+    )
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch file')
+    }
+    
+    return response.text()
+  } catch (error) {
+    console.error('Get file error:', error)
+    throw error
+  }
+}
+
 // ============ MAIN FETCH FUNCTIONS ============
 
 export async function fetchAllOrgRepos(token, org) {
@@ -250,7 +285,6 @@ export async function fetchAllOrgRepos(token, org) {
   let cursor = null
   
   try {
-    // Use GraphQL for fast repo fetching
     while (true) {
       const data = await fetchReposGraphQL(token, org, cursor)
       const repos = data.organization.repositories
@@ -268,7 +302,6 @@ export async function fetchAllOrgRepos(token, org) {
     }
   } catch (e) {
     console.warn('GraphQL repo fetch failed, falling back to REST:', e)
-    // Fallback to REST API
     const repos = await fetchWithAuth(
       `${GITHUB_API_BASE}/orgs/${org}/repos?per_page=100&sort=pushed`,
       token
@@ -286,7 +319,6 @@ export async function fetchAllOrgRepos(token, org) {
 }
 
 export async function fetchUserActivities(token, org, username, onProgress, useCache = true) {
-  // Check cache first
   if (useCache) {
     const cached = getCache()
     if (cached && cached.org === org && cached.username === username) {
@@ -301,7 +333,6 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
   const repoSet = new Set()
   
   try {
-    // PARALLEL fetch: Get commits and PRs at the same time using Search API
     const [commitsResult, prsResult] = await Promise.all([
       fetchUserCommitsSearch(token, org, username),
       fetchUserPRsSearch(token, org, username),
@@ -309,7 +340,6 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
     
     onProgress?.({ processed: 50, total: 100, percentage: 50, status: 'Processing data...' })
     
-    // Process commits
     for (const commit of commitsResult) {
       const repoName = commit.repository.name
       repoSet.add(repoName)
@@ -333,14 +363,11 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
     
     onProgress?.({ processed: 75, total: 100, percentage: 75, status: 'Processing PRs...' })
     
-    // Process PRs
     for (const pr of prsResult) {
-      // Extract repo name from repository_url
       const repoFullName = pr.repository_url.replace('https://api.github.com/repos/', '')
       const repoName = repoFullName.split('/')[1]
       repoSet.add(repoName)
       
-      // Determine PR state
       let state = pr.state
       if (pr.pull_request?.merged_at) {
         state = 'merged'
@@ -374,7 +401,6 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
       })
     }
     
-    // Sort by date descending
     activities.sort((a, b) => new Date(b.date) - new Date(a.date))
     
     const result = {
@@ -384,9 +410,7 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
       username,
     }
     
-    // Cache the results
     setCache(result)
-    
     onProgress?.({ processed: 100, total: 100, percentage: 100, status: 'Complete!' })
     
     return result

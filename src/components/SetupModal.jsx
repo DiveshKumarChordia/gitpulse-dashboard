@@ -1,23 +1,38 @@
 import { useState, useEffect } from 'react'
-import { X, Key, Building2, User, Loader2, CheckCircle, AlertCircle, ExternalLink, Shield } from 'lucide-react'
+import { X, Key, Building2, Loader2, CheckCircle, AlertCircle, ExternalLink, Shield, Github, Sparkles } from 'lucide-react'
 import { validateToken, fetchUserOrgs } from '../api/github'
 
 export function SetupModal({ onSetup, onClose, initialConfig }) {
-  const [step, setStep] = useState(1)
+  const [authMethod, setAuthMethod] = useState(initialConfig?.authMethod || null) // null | 'oauth' | 'pat'
+  const [step, setStep] = useState(initialConfig?.token ? 2 : 1)
   const [token, setToken] = useState(initialConfig?.token || '')
   const [org, setOrg] = useState(initialConfig?.org || '')
   const [username, setUsername] = useState(initialConfig?.username || '')
-  const [orgs, setOrgs] = useState([])
+  const [orgs, setOrgs] = useState(initialConfig?.orgs || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [tokenValid, setTokenValid] = useState(false)
-  const [user, setUser] = useState(null)
+  const [tokenValid, setTokenValid] = useState(!!initialConfig?.token)
+  const [user, setUser] = useState(initialConfig?.user || null)
 
+  // If we already have token and orgs from OAuth, go to step 2
   useEffect(() => {
-    if (initialConfig?.token) {
-      handleValidateToken()
+    if (initialConfig?.token && initialConfig?.orgs && !initialConfig?.org) {
+      setOrgs(initialConfig.orgs)
+      setUser(initialConfig.user)
+      setUsername(initialConfig.username)
+      setTokenValid(true)
+      setAuthMethod('oauth')
+      setStep(2)
+    } else if (initialConfig?.token && initialConfig?.org) {
+      // Already fully configured
+      setStep(2)
     }
-  }, [])
+  }, [initialConfig])
+
+  const handleOAuthLogin = () => {
+    // Redirect to our OAuth login endpoint
+    window.location.href = '/api/auth/login'
+  }
 
   const handleValidateToken = async () => {
     if (!token.trim()) {
@@ -35,6 +50,7 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
         setTokenValid(true)
         setUser(result.user)
         setUsername(result.user.login)
+        setAuthMethod('pat')
         
         const userOrgs = await fetchUserOrgs(token)
         setOrgs(userOrgs)
@@ -59,8 +75,14 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
       token,
       org,
       username,
+      user,
+      orgs,
+      authMethod,
     })
   }
+
+  // Check if OAuth is available (only works when deployed on Vercel)
+  const isOAuthAvailable = window.location.hostname !== 'localhost' || import.meta.env.DEV
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -83,11 +105,11 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
             </h2>
             <p className="text-sm text-frost-300/60 mt-1">
               {step === 1 
-                ? 'Enter your Personal Access Token to get started' 
+                ? 'Choose how you want to authenticate' 
                 : 'Choose which organization to track'}
             </p>
           </div>
-          {initialConfig && (
+          {initialConfig?.org && (
             <button
               onClick={onClose}
               className="p-2 hover:bg-void-700 rounded-lg transition-colors"
@@ -101,75 +123,110 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
         <div className="p-6">
           {step === 1 ? (
             <div className="space-y-6">
-              {/* Token input */}
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-frost-200">
-                  <Key className="w-4 h-4 text-electric-400" />
-                  Personal Access Token
-                </label>
-                <input
-                  type="password"
-                  value={token}
-                  onChange={(e) => {
-                    setToken(e.target.value)
-                    setError('')
-                    setTokenValid(false)
-                  }}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                  className="w-full px-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 font-mono text-sm focus:outline-none focus:border-electric-400/50 focus:ring-2 focus:ring-electric-400/25 transition-all"
-                />
-                {tokenValid && (
-                  <div className="flex items-center gap-2 text-sm text-neon-green">
-                    <CheckCircle className="w-4 h-4" />
-                    Token validated successfully
-                  </div>
-                )}
-              </div>
-
-              {/* Instructions */}
-              <div className="bg-void-700/30 border border-void-600/30 rounded-xl p-4 space-y-3">
-                <div className="flex items-start gap-3">
-                  <Shield className="w-5 h-5 text-electric-400 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm text-frost-300/80">
-                    <p className="font-medium text-frost-200 mb-2">Required Token Scopes:</p>
-                    <ul className="space-y-1 text-frost-300/70">
-                      <li>• <code className="text-electric-400">repo</code> - Access repositories</li>
-                      <li>• <code className="text-electric-400">read:org</code> - Read organization membership</li>
-                    </ul>
-                  </div>
-                </div>
-                <a
-                  href="https://github.com/settings/tokens/new?description=GitPulse%20Dashboard&scopes=repo,read:org"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm text-electric-400 hover:text-electric-500 transition-colors"
+              {/* OAuth Option - Recommended */}
+              <div className="space-y-3">
+                <button
+                  onClick={handleOAuthLogin}
+                  className="w-full flex items-center gap-4 p-4 bg-void-700/30 hover:bg-void-700/50 border-2 border-electric-400/50 hover:border-electric-400 rounded-xl transition-all group"
                 >
-                  <ExternalLink className="w-4 h-4" />
-                  Create a new token on GitHub
-                </a>
+                  <div className="p-3 bg-gradient-to-br from-electric-400 to-electric-500 rounded-xl">
+                    <Github className="w-6 h-6 text-void-900" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-frost-100">Login with GitHub</span>
+                      <span className="px-2 py-0.5 bg-neon-green/20 text-neon-green text-xs rounded-full flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-sm text-frost-300/60 mt-1">
+                      Secure OAuth authentication - no token management needed
+                    </p>
+                  </div>
+                </button>
               </div>
 
-              {error && (
-                <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  {error}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-void-600/50"></div>
                 </div>
-              )}
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-4 bg-void-800 text-frost-300/60">or use a token</span>
+                </div>
+              </div>
 
-              <button
-                onClick={handleValidateToken}
-                disabled={loading || !token.trim()}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed glow-blue"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Validating...
-                  </>
-                ) : (
-                  'Continue'
+              {/* PAT Option */}
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-frost-200">
+                    <Key className="w-4 h-4 text-frost-300/60" />
+                    Personal Access Token
+                  </label>
+                  <input
+                    type="password"
+                    value={token}
+                    onChange={(e) => {
+                      setToken(e.target.value)
+                      setError('')
+                      setTokenValid(false)
+                    }}
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    className="w-full px-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 font-mono text-sm focus:outline-none focus:border-electric-400/50 focus:ring-2 focus:ring-electric-400/25 transition-all"
+                  />
+                  {tokenValid && (
+                    <div className="flex items-center gap-2 text-sm text-neon-green">
+                      <CheckCircle className="w-4 h-4" />
+                      Token validated successfully
+                    </div>
+                  )}
+                </div>
+
+                {/* Instructions */}
+                <div className="bg-void-700/30 border border-void-600/30 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Shield className="w-5 h-5 text-frost-300/60 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-frost-300/80">
+                      <p className="font-medium text-frost-200 mb-2">Required Token Scopes:</p>
+                      <ul className="space-y-1 text-frost-300/70">
+                        <li>• <code className="text-electric-400">repo</code> - Access repositories</li>
+                        <li>• <code className="text-electric-400">read:org</code> - Read organization membership</li>
+                      </ul>
+                    </div>
+                  </div>
+                  <a
+                    href="https://github.com/settings/tokens/new?description=GitPulse%20Dashboard&scopes=repo,read:org"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-electric-400 hover:text-electric-500 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Create a new token on GitHub
+                  </a>
+                </div>
+
+                {error && (
+                  <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    {error}
+                  </div>
                 )}
-              </button>
+
+                <button
+                  onClick={handleValidateToken}
+                  disabled={loading || !token.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-void-700/50 hover:bg-void-700 border border-void-600/50 rounded-xl text-frost-200 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Validating...
+                    </>
+                  ) : (
+                    'Continue with Token'
+                  )}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-6">
@@ -185,6 +242,11 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
                     <div className="font-medium text-frost-100">{user.name || user.login}</div>
                     <div className="text-sm text-frost-300/60">@{user.login}</div>
                   </div>
+                  {authMethod === 'oauth' && (
+                    <span className="ml-auto px-2 py-1 bg-neon-green/20 text-neon-green text-xs rounded-full">
+                      OAuth Connected
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -215,7 +277,7 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
                           className="hidden"
                         />
                         <img
-                          src={orgItem.avatarUrl}
+                          src={orgItem.avatarUrl || orgItem.avatar_url}
                           alt={orgItem.login}
                           className="w-8 h-8 rounded-lg"
                         />
@@ -256,7 +318,12 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => setStep(1)}
+                  onClick={() => {
+                    setStep(1)
+                    setTokenValid(false)
+                    setToken('')
+                    setOrgs([])
+                  }}
                   className="flex-1 px-4 py-3 bg-void-700/50 hover:bg-void-700 border border-void-600/50 rounded-xl text-frost-200 font-medium transition-all"
                 >
                   Back
@@ -276,4 +343,3 @@ export function SetupModal({ onSetup, onClose, initialConfig }) {
     </div>
   )
 }
-

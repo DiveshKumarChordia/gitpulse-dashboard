@@ -6,6 +6,7 @@ import { Timeline } from './components/Timeline'
 import { SetupModal } from './components/SetupModal'
 import { StatsBar } from './components/StatsBar'
 import { HeatMap } from './components/HeatMap'
+import { CodeSearch } from './components/CodeSearch'
 import { EmptyState } from './components/EmptyState'
 import { LoadingState } from './components/LoadingState'
 import { fetchUserActivities, fetchAllOrgRepos } from './api/github'
@@ -20,18 +21,58 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(null)
   const [error, setError] = useState(null)
-  const [repos, setRepos] = useState([]) // Repos with activity
-  const [allRepos, setAllRepos] = useState([]) // All accessible repos
+  const [repos, setRepos] = useState([])
+  const [allRepos, setAllRepos] = useState([])
+  
+  // Active tab
+  const [activeTab, setActiveTab] = useState('activity') // 'activity' | 'search'
   
   // Filters
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [selectedRepos, setSelectedRepos] = useState([])
-  const [activityType, setActivityType] = useState('all') // 'all', 'commits', 'prs'
+  const [activityType, setActivityType] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedDate, setSelectedDate] = useState(null) // From heatmap click
+  const [selectedDate, setSelectedDate] = useState(null)
   
   const [showSetup, setShowSetup] = useState(!config)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  // Handle OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const authData = params.get('auth')
+    const error = params.get('error')
+    
+    if (error) {
+      console.error('OAuth error:', error)
+      window.history.replaceState({}, '', window.location.pathname)
+      return
+    }
+    
+    if (authData) {
+      try {
+        const decoded = JSON.parse(atob(authData))
+        // Show org selection if multiple orgs
+        if (decoded.orgs && decoded.orgs.length > 0) {
+          setConfig({
+            token: decoded.token,
+            username: decoded.user.login,
+            user: decoded.user,
+            orgs: decoded.orgs,
+            org: decoded.orgs.length === 1 ? decoded.orgs[0].login : null,
+            authMethod: 'oauth',
+          })
+          if (decoded.orgs.length > 1) {
+            setShowSetup(true)
+          }
+        }
+        // Clear URL
+        window.history.replaceState({}, '', window.location.pathname)
+      } catch (e) {
+        console.error('Failed to parse auth data:', e)
+      }
+    }
+  }, [])
 
   // Save config to localStorage
   useEffect(() => {
@@ -40,7 +81,7 @@ function App() {
     }
   }, [config])
 
-  // Fetch activities when config changes
+  // Fetch activities
   const loadActivities = useCallback(async () => {
     if (!config?.token || !config?.org) return
     
@@ -49,11 +90,9 @@ function App() {
     setProgress(null)
     
     try {
-      // Fetch all repos first
       const orgRepos = await fetchAllOrgRepos(config.token, config.org)
       setAllRepos(orgRepos)
       
-      // Fetch user activities with progress callback
       const data = await fetchUserActivities(
         config.token, 
         config.org, 
@@ -71,11 +110,13 @@ function App() {
   }, [config])
 
   useEffect(() => {
-    loadActivities()
-  }, [loadActivities])
+    if (config?.org) {
+      loadActivities()
+    }
+  }, [config?.org, loadActivities])
 
   const handleSetup = (newConfig) => {
-    setConfig(newConfig)
+    setConfig(prev => ({ ...prev, ...newConfig }))
     setShowSetup(false)
   }
 
@@ -90,7 +131,6 @@ function App() {
 
   const handleDateSelect = (date) => {
     setSelectedDate(date)
-    // Clear manual date range when selecting from heatmap
     if (date) {
       setDateRange({ from: '', to: '' })
     }
@@ -98,12 +138,10 @@ function App() {
 
   // Filter activities
   const filteredActivities = activities.filter(activity => {
-    // Heatmap date filter (takes precedence)
     if (selectedDate) {
       const activityDate = new Date(activity.date)
       if (!isSameDay(activityDate, selectedDate)) return false
     } else {
-      // Manual date range filter
       if (dateRange.from) {
         const activityDate = new Date(activity.date)
         const fromDate = new Date(dateRange.from)
@@ -118,17 +156,14 @@ function App() {
       }
     }
     
-    // Repository filter
     if (selectedRepos.length > 0 && !selectedRepos.includes(activity.repo)) {
       return false
     }
     
-    // Activity type filter
     if (activityType !== 'all' && activity.type !== activityType) {
       return false
     }
     
-    // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
       const matchesMessage = activity.message?.toLowerCase().includes(query)
@@ -140,7 +175,6 @@ function App() {
     return true
   })
 
-  // Calculate stats
   const stats = {
     totalCommits: filteredActivities.filter(a => a.type === 'commit').length,
     totalPRs: filteredActivities.filter(a => a.type === 'pr').length,
@@ -148,6 +182,9 @@ function App() {
   }
 
   const hasActiveFilters = selectedRepos.length > 0 || dateRange.from || dateRange.to || activityType !== 'all' || selectedDate
+
+  // Check if setup is needed
+  const needsSetup = !config || !config.org
 
   return (
     <div className="min-h-screen bg-void-900 bg-grid">
@@ -165,87 +202,97 @@ function App() {
           onOpenSetup={() => setShowSetup(true)}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
         />
         
         <div className="flex">
-          <Sidebar 
-            isOpen={sidebarOpen}
-            repos={repos}
-            allRepos={allRepos}
-            selectedRepos={selectedRepos}
-            onRepoChange={setSelectedRepos}
-            dateRange={dateRange}
-            onDateRangeChange={(range) => {
-              setDateRange(range)
-              // Clear heatmap selection when using manual date range
-              if (range.from || range.to) {
-                setSelectedDate(null)
-              }
-            }}
-            activityType={activityType}
-            onActivityTypeChange={setActivityType}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onRefresh={loadActivities}
-            loading={loading}
-            progress={progress}
-          />
+          {activeTab === 'activity' && (
+            <Sidebar 
+              isOpen={sidebarOpen}
+              repos={repos}
+              allRepos={allRepos}
+              selectedRepos={selectedRepos}
+              onRepoChange={setSelectedRepos}
+              dateRange={dateRange}
+              onDateRangeChange={(range) => {
+                setDateRange(range)
+                if (range.from || range.to) {
+                  setSelectedDate(null)
+                }
+              }}
+              activityType={activityType}
+              onActivityTypeChange={setActivityType}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onRefresh={loadActivities}
+              loading={loading}
+              progress={progress}
+            />
+          )}
           
-          <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-80' : 'ml-0'}`}>
+          <main className={`flex-1 transition-all duration-300 ${sidebarOpen && activeTab === 'activity' ? 'ml-80' : 'ml-0'}`}>
             <div className="p-6 max-w-6xl mx-auto">
-              {/* Stats Bar */}
-              <StatsBar stats={stats} />
-              
-              {/* Heatmap - only show when we have activities */}
-              {activities.length > 0 && !loading && (
-                <HeatMap 
-                  activities={activities}
-                  selectedDate={selectedDate}
-                  onDateSelect={handleDateSelect}
-                />
-              )}
-              
-              {/* Selected date indicator */}
-              {selectedDate && (
-                <div className="mb-6 flex items-center gap-3 p-4 bg-neon-pink/10 border border-neon-pink/30 rounded-xl">
-                  <span className="text-neon-pink font-medium">
-                    Showing activities for {format(selectedDate, 'EEEE, MMMM d, yyyy')}
-                  </span>
-                  <button
-                    onClick={() => setSelectedDate(null)}
-                    className="ml-auto text-sm text-frost-300/60 hover:text-frost-100 transition-colors"
-                  >
-                    Clear filter
-                  </button>
-                </div>
-              )}
-              
-              {loading ? (
-                <LoadingState progress={progress} />
-              ) : error ? (
-                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
-                  <p className="text-red-400 font-medium">{error}</p>
-                  <button 
-                    onClick={loadActivities}
-                    className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
-                  >
-                    Try Again
-                  </button>
-                </div>
-              ) : filteredActivities.length === 0 ? (
-                <EmptyState hasFilters={hasActiveFilters} />
+              {activeTab === 'activity' ? (
+                <>
+                  <StatsBar stats={stats} />
+                  
+                  {activities.length > 0 && !loading && (
+                    <HeatMap 
+                      activities={activities}
+                      selectedDate={selectedDate}
+                      onDateSelect={handleDateSelect}
+                    />
+                  )}
+                  
+                  {selectedDate && (
+                    <div className="mb-6 flex items-center gap-3 p-4 bg-neon-pink/10 border border-neon-pink/30 rounded-xl">
+                      <span className="text-neon-pink font-medium">
+                        Showing activities for {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+                      </span>
+                      <button
+                        onClick={() => setSelectedDate(null)}
+                        className="ml-auto text-sm text-frost-300/60 hover:text-frost-100 transition-colors"
+                      >
+                        Clear filter
+                      </button>
+                    </div>
+                  )}
+                  
+                  {loading ? (
+                    <LoadingState progress={progress} />
+                  ) : error ? (
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
+                      <p className="text-red-400 font-medium">{error}</p>
+                      <button 
+                        onClick={loadActivities}
+                        className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
+                      >
+                        Try Again
+                      </button>
+                    </div>
+                  ) : filteredActivities.length === 0 ? (
+                    <EmptyState hasFilters={hasActiveFilters} />
+                  ) : (
+                    <Timeline activities={filteredActivities} />
+                  )}
+                </>
               ) : (
-                <Timeline activities={filteredActivities} />
+                <CodeSearch 
+                  token={config?.token}
+                  org={config?.org}
+                  allRepos={allRepos}
+                />
               )}
             </div>
           </main>
         </div>
       </div>
 
-      {showSetup && (
+      {(showSetup || needsSetup) && (
         <SetupModal 
           onSetup={handleSetup} 
-          onClose={() => config && setShowSetup(false)}
+          onClose={() => !needsSetup && setShowSetup(false)}
           initialConfig={config}
         />
       )}

@@ -1,17 +1,19 @@
-import { Menu, Settings, LogOut, Github, Zap } from 'lucide-react'
+import { Menu, Settings, LogOut, Github, Zap, Activity, Code2 } from 'lucide-react'
 
-export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSidebar }) {
+export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSidebar, activeTab, onTabChange }) {
   return (
     <header className="sticky top-0 z-50 backdrop-blur-xl bg-void-900/80 border-b border-void-600/50">
       <div className="flex items-center justify-between px-6 py-4">
         <div className="flex items-center gap-4">
-          <button
-            onClick={onToggleSidebar}
-            className="p-2 hover:bg-void-700 rounded-lg transition-colors"
-            title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-          >
-            <Menu className="w-5 h-5 text-frost-200" />
-          </button>
+          {activeTab === 'activity' && (
+            <button
+              onClick={onToggleSidebar}
+              className="p-2 hover:bg-void-700 rounded-lg transition-colors"
+              title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            >
+              <Menu className="w-5 h-5 text-frost-200" />
+            </button>
+          )}
           
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -27,9 +29,44 @@ export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSid
           </div>
         </div>
 
+        {/* Tabs */}
+        {config?.org && (
+          <div className="flex items-center gap-1 p-1 bg-void-700/50 rounded-xl border border-void-600/50">
+            <button
+              onClick={() => onTabChange('activity')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'activity'
+                  ? 'bg-electric-400 text-void-900'
+                  : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              Activity
+            </button>
+            <button
+              onClick={() => onTabChange('search')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'search'
+                  ? 'bg-neon-pink text-white'
+                  : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'
+              }`}
+            >
+              <Code2 className="w-4 h-4" />
+              Code Search
+            </button>
+          </div>
+        )}
+
         {config && (
           <div className="flex items-center gap-4">
             <div className="hidden md:flex items-center gap-3 px-4 py-2 bg-void-700/50 rounded-xl border border-void-600/50">
+              {config.user?.avatar_url && (
+                <img 
+                  src={config.user.avatar_url} 
+                  alt={config.username}
+                  className="w-6 h-6 rounded-full"
+                />
+              )}
               <Github className="w-4 h-4 text-electric-400" />
               <span className="text-sm text-frost-200">
                 <span className="text-frost-300/60">@</span>
@@ -37,6 +74,11 @@ export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSid
               </span>
               <span className="text-frost-300/40">•</span>
               <span className="text-sm text-electric-400 font-medium">{config.org}</span>
+              {config.authMethod === 'oauth' && (
+                <span className="px-1.5 py-0.5 bg-neon-green/20 text-neon-green text-xs rounded">
+                  OAuth
+                </span>
+              )}
             </div>
             
             <div className="flex items-center gap-2">
@@ -62,4 +104,3 @@ export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSid
     </header>
   )
 }
-
