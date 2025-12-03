@@ -1,7 +1,7 @@
 const GITHUB_API_BASE = 'https://api.github.com'
 const GITHUB_GRAPHQL = 'https://api.github.com/graphql'
 const CACHE_KEY = 'gitpulse-cache'
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000
 
 // ============ CACHING ============
 function getCache() {
@@ -14,20 +14,13 @@ function getCache() {
       return null
     }
     return data
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 function setCache(data) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      data,
-      timestamp: Date.now()
-    }))
-  } catch (e) {
-    console.warn('Cache write failed:', e)
-  }
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }))
+  } catch (e) { console.warn('Cache write failed:', e) }
 }
 
 export function clearCache() {
@@ -66,37 +59,19 @@ async function graphqlQuery(token, query, variables = {}) {
     body: JSON.stringify({ query, variables }),
   })
   
-  if (!response.ok) {
-    throw new Error(`GraphQL error: ${response.statusText}`)
-  }
-  
+  if (!response.ok) throw new Error(`GraphQL error: ${response.statusText}`)
   const result = await response.json()
-  if (result.errors) {
-    console.warn('GraphQL errors:', result.errors)
-  }
+  if (result.errors) console.warn('GraphQL errors:', result.errors)
   return result.data
 }
 
-// Fetch repos with GraphQL
 async function fetchReposGraphQL(token, org, cursor = null) {
   const query = `
     query($org: String!, $cursor: String) {
       organization(login: $org) {
         repositories(first: 100, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-          nodes {
-            name
-            description
-            pushedAt
-            url
-            isPrivate
-            defaultBranchRef {
-              name
-            }
-          }
+          pageInfo { hasNextPage endCursor }
+          nodes { name description pushedAt url isPrivate defaultBranchRef { name } }
         }
       }
     }
@@ -105,85 +80,46 @@ async function fetchReposGraphQL(token, org, cursor = null) {
 }
 
 // ============ REPOSITORY STRUCTURE ============
-
 export async function fetchBranches(token, owner, repo) {
   const branches = []
   let page = 1
-  
   while (true) {
     try {
-      const data = await fetchWithAuth(
-        `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches?per_page=100&page=${page}`,
-        token
-      )
-      branches.push(...data.map(b => ({
-        name: b.name,
-        sha: b.commit.sha,
-        protected: b.protected,
-      })))
-      
+      const data = await fetchWithAuth(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches?per_page=100&page=${page}`, token)
+      branches.push(...data.map(b => ({ name: b.name, sha: b.commit.sha, protected: b.protected })))
       if (data.length < 100) break
       page++
-    } catch (e) {
-      console.error('Error fetching branches:', e)
-      break
-    }
+    } catch (e) { break }
   }
-  
   return branches
 }
 
 export async function fetchRepoTree(token, owner, repo, branch = 'main') {
   try {
-    const branchData = await fetchWithAuth(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`,
-      token
-    )
-    
+    const branchData = await fetchWithAuth(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`, token)
     const treeSha = branchData.commit.commit.tree.sha
-    
-    const treeData = await fetchWithAuth(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
-      token
-    )
-    
+    const treeData = await fetchWithAuth(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`, token)
     return buildFileTree(treeData.tree)
-  } catch (e) {
-    console.error('Error fetching repo tree:', e)
-    throw e
-  }
+  } catch (e) { throw e }
 }
 
 function buildFileTree(items) {
   const root = { name: '', path: '', type: 'tree', children: [] }
-  
   for (const item of items) {
     const parts = item.path.split('/')
     let current = root
-    
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
       const isLast = i === parts.length - 1
       const currentPath = parts.slice(0, i + 1).join('/')
-      
       let child = current.children.find(c => c.name === part)
-      
       if (!child) {
-        child = {
-          name: part,
-          path: currentPath,
-          type: isLast ? item.type : 'tree',
-          sha: isLast ? item.sha : undefined,
-          size: isLast ? item.size : undefined,
-          children: [],
-        }
+        child = { name: part, path: currentPath, type: isLast ? item.type : 'tree', sha: isLast ? item.sha : undefined, children: [] }
         current.children.push(child)
       }
-      
       current = child
     }
   }
-  
   const sortTree = (node) => {
     if (node.children) {
       node.children.sort((a, b) => {
@@ -195,116 +131,148 @@ function buildFileTree(items) {
     }
   }
   sortTree(root)
-  
   return root.children
 }
 
-// Fetch user commits via search API
-async function fetchUserCommitsSearch(token, org, username) {
-  const query = `author:${username} org:${org}`
-  const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(query)}&sort=author-date&order=desc&per_page=100`
+// ============ SEARCH COMMITS ============
+export async function searchCommits(token, query, org, repos = [], branches = []) {
+  // Build search query
+  let searchQuery = query
   
-  const results = []
-  let page = 1
-  const maxPages = 10
-  
-  while (page <= maxPages) {
-    try {
-      const response = await fetch(`${url}&page=${page}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github.cloak-preview+json',
-          'User-Agent': 'GitPulse-Dashboard',
-        },
-      })
-      
-      if (!response.ok) break
-      
-      const data = await response.json()
-      results.push(...data.items)
-      
-      if (data.items.length < 100 || results.length >= data.total_count) break
-      page++
-    } catch (e) {
-      console.warn('Commit search error:', e)
-      break
-    }
+  if (repos.length > 0) {
+    // Search specific repos
+    const repoQueries = repos.slice(0, 5).map(r => `repo:${org}/${r}`).join(' ')
+    searchQuery += ` ${repoQueries}`
+  } else {
+    searchQuery += ` org:${org}`
   }
+
+  const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(searchQuery)}&sort=committer-date&order=desc&per_page=50`
   
-  return results
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.cloak-preview+json',
+        'User-Agent': 'GitPulse-Dashboard',
+      },
+    })
+    
+    if (!response.ok) {
+      if (response.status === 403) throw new Error('Rate limit exceeded')
+      throw new Error(`Search failed: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Filter by branches if specified
+    let items = data.items || []
+    
+    return {
+      totalCount: data.total_count,
+      items: items.map(commit => ({
+        type: 'commit',
+        sha: commit.sha,
+        shortSha: commit.sha.substring(0, 7),
+        message: commit.commit.message.split('\n')[0],
+        fullMessage: commit.commit.message,
+        date: commit.commit.committer.date,
+        url: commit.html_url,
+        author: commit.author?.login || commit.commit.author.name,
+        avatarUrl: commit.author?.avatar_url,
+        repository: {
+          name: commit.repository.name,
+          fullName: commit.repository.full_name,
+        },
+      })),
+    }
+  } catch (error) {
+    console.error('Commit search error:', error)
+    throw error
+  }
 }
 
-// Fetch user PRs via search API
-async function fetchUserPRsSearch(token, org, username) {
-  const query = `author:${username} org:${org} is:pr`
-  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=created&order=desc&per_page=100`
+// ============ SEARCH PRS ============
+export async function searchPRs(token, query, org, repos = []) {
+  // Build search query - search in title and body
+  let searchQuery = `${query} is:pr`
   
-  const results = []
-  let page = 1
-  const maxPages = 10
-  
-  while (page <= maxPages) {
-    try {
-      const response = await fetch(`${url}&page=${page}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'GitPulse-Dashboard',
-        },
-      })
-      
-      if (!response.ok) break
-      
-      const data = await response.json()
-      results.push(...data.items)
-      
-      if (data.items.length < 100 || results.length >= data.total_count) break
-      page++
-    } catch (e) {
-      console.warn('PR search error:', e)
-      break
-    }
+  if (repos.length > 0) {
+    const repoQueries = repos.slice(0, 5).map(r => `repo:${org}/${r}`).join(' ')
+    searchQuery += ` ${repoQueries}`
+  } else {
+    searchQuery += ` org:${org}`
   }
+
+  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(searchQuery)}&sort=created&order=desc&per_page=50`
   
-  return results
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'GitPulse-Dashboard',
+      },
+    })
+    
+    if (!response.ok) {
+      if (response.status === 403) throw new Error('Rate limit exceeded')
+      throw new Error(`Search failed: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    return {
+      totalCount: data.total_count,
+      items: (data.items || []).map(pr => {
+        const repoUrl = pr.repository_url
+        const repoFullName = repoUrl.replace('https://api.github.com/repos/', '')
+        const repoName = repoFullName.split('/')[1]
+        
+        return {
+          type: 'pr',
+          number: pr.number,
+          title: pr.title,
+          body: pr.body,
+          state: pr.state,
+          date: pr.created_at,
+          updatedAt: pr.updated_at,
+          url: pr.html_url,
+          author: pr.user.login,
+          avatarUrl: pr.user.avatar_url,
+          labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [],
+          repository: {
+            name: repoName,
+            fullName: repoFullName,
+          },
+        }
+      }),
+    }
+  } catch (error) {
+    console.error('PR search error:', error)
+    throw error
+  }
 }
 
 // ============ CODE SEARCH ============
 export async function searchCode(token, query, org, repo, options = {}) {
   const { paths = [], language, extension } = options
   
-  // Build search query - start with the search term
   let searchQuery = query.trim()
   
-  // Add repo filter
-  if (repo && org) {
+  if (repo) {
     searchQuery += ` repo:${org}/${repo}`
   } else if (org) {
     searchQuery += ` org:${org}`
   }
   
-  // Add path filter - only use top-level folder paths to avoid query length issues
-  // GitHub code search works best with simple path prefixes
   if (paths.length > 0) {
-    // Get unique top-level folders/files (limit to 3 to avoid query length issues)
     const topPaths = [...new Set(paths.map(p => p.split('/')[0]))].slice(0, 3)
-    if (topPaths.length > 0 && topPaths.length <= 3) {
-      // Use path: for folder filtering
-      searchQuery += ` path:${topPaths[0]}`
-    }
+    if (topPaths.length > 0) searchQuery += ` path:${topPaths[0]}`
   }
   
-  // Add language filter
-  if (language) {
-    searchQuery += ` language:${language}`
-  }
-  
-  // Add extension filter
-  if (extension) {
-    searchQuery += ` extension:${extension}`
-  }
-  
-  console.log('Code search query:', searchQuery)
+  if (language) searchQuery += ` language:${language}`
+  if (extension) searchQuery += ` extension:${extension}`
   
   const url = `${GITHUB_API_BASE}/search/code?q=${encodeURIComponent(searchQuery)}&per_page=50`
   
@@ -318,26 +286,18 @@ export async function searchCode(token, query, org, repo, options = {}) {
     })
     
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      console.error('Code search failed:', response.status, errorData)
-      
-      if (response.status === 403) {
-        throw new Error('Rate limit exceeded. Please wait a moment and try again.')
-      }
-      if (response.status === 422) {
-        throw new Error('Search query too complex. Try simpler terms or fewer filters.')
-      }
+      if (response.status === 403) throw new Error('Rate limit exceeded')
+      if (response.status === 422) throw new Error('Search query too complex')
       throw new Error(`Search failed: ${response.statusText}`)
     }
     
     const data = await response.json()
     
-    console.log('Code search results:', data.total_count, 'items')
-    
     return {
       totalCount: data.total_count,
       incompleteResults: data.incomplete_results,
       items: (data.items || []).map(item => ({
+        type: 'code',
         name: item.name,
         path: item.path,
         sha: item.sha,
@@ -350,17 +310,68 @@ export async function searchCode(token, query, org, repo, options = {}) {
         },
         textMatches: item.text_matches?.map(match => ({
           fragment: match.fragment,
-          matches: match.matches?.map(m => ({
-            text: m.text,
-            indices: m.indices,
-          })),
+          matches: match.matches?.map(m => ({ text: m.text, indices: m.indices })),
         })) || [],
       })),
     }
   } catch (error) {
-    console.error('Code search error:', error)
     throw error
   }
+}
+
+// ============ UNIFIED SEARCH ============
+export async function unifiedSearch(token, query, org, options = {}) {
+  const { repos = [], branches = [], paths = [], language, extension, searchTypes = ['code', 'commits', 'prs'] } = options
+  
+  const results = {
+    code: { totalCount: 0, items: [] },
+    commits: { totalCount: 0, items: [] },
+    prs: { totalCount: 0, items: [] },
+  }
+  
+  const promises = []
+  
+  // Search code
+  if (searchTypes.includes('code')) {
+    if (repos.length > 0) {
+      // Search each repo
+      for (const repo of repos.slice(0, 5)) {
+        promises.push(
+          searchCode(token, query, org, repo, { paths, language, extension })
+            .then(r => { results.code.totalCount += r.totalCount; results.code.items.push(...r.items) })
+            .catch(() => {})
+        )
+      }
+    } else {
+      promises.push(
+        searchCode(token, query, org, null, { language, extension })
+          .then(r => { results.code = r })
+          .catch(() => {})
+      )
+    }
+  }
+  
+  // Search commits
+  if (searchTypes.includes('commits')) {
+    promises.push(
+      searchCommits(token, query, org, repos, branches)
+        .then(r => { results.commits = r })
+        .catch(() => {})
+    )
+  }
+  
+  // Search PRs
+  if (searchTypes.includes('prs')) {
+    promises.push(
+      searchPRs(token, query, org, repos)
+        .then(r => { results.prs = r })
+        .catch(() => {})
+    )
+  }
+  
+  await Promise.all(promises)
+  
+  return results
 }
 
 // Get file content
@@ -376,20 +387,12 @@ export async function getFileContent(token, owner, repo, path, branch = 'main') 
         },
       }
     )
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch file')
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch file')
     return response.text()
-  } catch (error) {
-    console.error('Get file error:', error)
-    throw error
-  }
+  } catch (error) { throw error }
 }
 
 // ============ MAIN FETCH FUNCTIONS ============
-
 export async function fetchAllOrgRepos(token, org) {
   const allRepos = []
   let cursor = null
@@ -398,7 +401,6 @@ export async function fetchAllOrgRepos(token, org) {
     while (true) {
       const data = await fetchReposGraphQL(token, org, cursor)
       const repos = data.organization.repositories
-      
       allRepos.push(...repos.nodes.map(repo => ({
         name: repo.name,
         description: repo.description,
@@ -407,16 +409,11 @@ export async function fetchAllOrgRepos(token, org) {
         private: repo.isPrivate,
         defaultBranch: repo.defaultBranchRef?.name || 'main',
       })))
-      
       if (!repos.pageInfo.hasNextPage) break
       cursor = repos.pageInfo.endCursor
     }
   } catch (e) {
-    console.warn('GraphQL repo fetch failed, falling back to REST:', e)
-    const repos = await fetchWithAuth(
-      `${GITHUB_API_BASE}/orgs/${org}/repos?per_page=100&sort=pushed`,
-      token
-    )
+    const repos = await fetchWithAuth(`${GITHUB_API_BASE}/orgs/${org}/repos?per_page=100&sort=pushed`, token)
     return repos.map(repo => ({
       name: repo.name,
       description: repo.description,
@@ -430,6 +427,46 @@ export async function fetchAllOrgRepos(token, org) {
   return allRepos
 }
 
+async function fetchUserCommitsSearch(token, org, username) {
+  const query = `author:${username} org:${org}`
+  const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(query)}&sort=author-date&order=desc&per_page=100`
+  const results = []
+  let page = 1
+  while (page <= 10) {
+    try {
+      const response = await fetch(`${url}&page=${page}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.cloak-preview+json', 'User-Agent': 'GitPulse-Dashboard' },
+      })
+      if (!response.ok) break
+      const data = await response.json()
+      results.push(...data.items)
+      if (data.items.length < 100 || results.length >= data.total_count) break
+      page++
+    } catch (e) { break }
+  }
+  return results
+}
+
+async function fetchUserPRsSearch(token, org, username) {
+  const query = `author:${username} org:${org} is:pr`
+  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=created&order=desc&per_page=100`
+  const results = []
+  let page = 1
+  while (page <= 10) {
+    try {
+      const response = await fetch(`${url}&page=${page}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
+      })
+      if (!response.ok) break
+      const data = await response.json()
+      results.push(...data.items)
+      if (data.items.length < 100 || results.length >= data.total_count) break
+      page++
+    } catch (e) { break }
+  }
+  return results
+}
+
 export async function fetchUserActivities(token, org, username, onProgress, useCache = true) {
   if (useCache) {
     const cached = getCache()
@@ -439,7 +476,7 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
     }
   }
   
-  onProgress?.({ processed: 0, total: 100, percentage: 0, status: 'Fetching commits...' })
+  onProgress?.({ processed: 0, total: 100, percentage: 0, status: 'Fetching...' })
   
   const activities = []
   const repoSet = new Set()
@@ -450,107 +487,53 @@ export async function fetchUserActivities(token, org, username, onProgress, useC
       fetchUserPRsSearch(token, org, username),
     ])
     
-    onProgress?.({ processed: 50, total: 100, percentage: 50, status: 'Processing data...' })
+    onProgress?.({ processed: 50, total: 100, percentage: 50, status: 'Processing...' })
     
     for (const commit of commitsResult) {
       const repoName = commit.repository.name
       repoSet.add(repoName)
-      
       activities.push({
-        id: commit.sha,
-        type: 'commit',
-        repo: repoName,
-        repoFullName: commit.repository.full_name,
-        message: commit.commit.message.split('\n')[0],
-        fullMessage: commit.commit.message,
-        date: commit.commit.author.date,
-        sha: commit.sha,
-        shortSha: commit.sha.substring(0, 7),
-        url: commit.html_url,
-        author: commit.author?.login || commit.commit.author.name,
-        avatarUrl: commit.author?.avatar_url,
-        branch: null,
+        id: commit.sha, type: 'commit', repo: repoName, repoFullName: commit.repository.full_name,
+        message: commit.commit.message.split('\n')[0], fullMessage: commit.commit.message,
+        date: commit.commit.author.date, sha: commit.sha, shortSha: commit.sha.substring(0, 7),
+        url: commit.html_url, author: commit.author?.login || commit.commit.author.name,
+        avatarUrl: commit.author?.avatar_url, branch: null,
       })
     }
-    
-    onProgress?.({ processed: 75, total: 100, percentage: 75, status: 'Processing PRs...' })
     
     for (const pr of prsResult) {
       const repoFullName = pr.repository_url.replace('https://api.github.com/repos/', '')
       const repoName = repoFullName.split('/')[1]
       repoSet.add(repoName)
-      
-      let state = pr.state
-      if (pr.pull_request?.merged_at) {
-        state = 'merged'
-      }
-      
       activities.push({
-        id: `pr-${pr.id}`,
-        type: 'pr',
-        repo: repoName,
-        repoFullName: repoFullName,
-        message: pr.title,
-        body: pr.body,
-        date: pr.created_at,
-        updatedAt: pr.updated_at,
-        closedAt: pr.closed_at,
-        mergedAt: pr.pull_request?.merged_at,
-        number: pr.number,
-        url: pr.html_url,
-        state: state,
-        author: pr.user.login,
-        avatarUrl: pr.user.avatar_url,
-        branch: null,
-        baseBranch: null,
-        additions: null,
-        deletions: null,
-        changedFiles: null,
-        comments: pr.comments,
-        reviewComments: null,
-        labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [],
-        draft: pr.draft,
+        id: `pr-${pr.id}`, type: 'pr', repo: repoName, repoFullName,
+        message: pr.title, body: pr.body, date: pr.created_at, updatedAt: pr.updated_at,
+        closedAt: pr.closed_at, mergedAt: pr.pull_request?.merged_at, number: pr.number,
+        url: pr.html_url, state: pr.pull_request?.merged_at ? 'merged' : pr.state,
+        author: pr.user.login, avatarUrl: pr.user.avatar_url,
+        labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [], draft: pr.draft,
       })
     }
     
     activities.sort((a, b) => new Date(b.date) - new Date(a.date))
     
-    const result = {
-      activities,
-      repos: Array.from(repoSet).sort(),
-      org,
-      username,
-    }
-    
+    const result = { activities, repos: Array.from(repoSet).sort(), org, username }
     setCache(result)
     onProgress?.({ processed: 100, total: 100, percentage: 100, status: 'Complete!' })
-    
     return result
-    
-  } catch (error) {
-    console.error('Error fetching activities:', error)
-    throw error
-  }
+  } catch (error) { throw error }
 }
 
 export async function validateToken(token) {
   try {
     const user = await fetchWithAuth(`${GITHUB_API_BASE}/user`, token)
     return { valid: true, user }
-  } catch (error) {
-    return { valid: false, error: error.message }
-  }
+  } catch (error) { return { valid: false, error: error.message } }
 }
 
 export async function fetchUserOrgs(token) {
   try {
     const orgs = await fetchWithAuth(`${GITHUB_API_BASE}/user/orgs`, token)
-    return orgs.map(org => ({
-      login: org.login,
-      avatarUrl: org.avatar_url,
-      description: org.description,
-    }))
-  } catch (error) {
-    throw error
-  }
+    return orgs.map(org => ({ login: org.login, avatarUrl: org.avatar_url, description: org.description }))
+  } catch (error) { throw error }
 }

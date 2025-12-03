@@ -3,9 +3,9 @@ import {
   Search, FileCode, Folder, ExternalLink, Code2, Loader2, AlertCircle, 
   ChevronDown, ChevronUp, GitBranch, Check, FolderTree, ArrowRight,
   RotateCcw, Sparkles, GitCommit, Link, ChevronLeft, ChevronRight as ChevronRightIcon,
-  AlertTriangle
+  AlertTriangle, GitPullRequest, GitMerge, MessageSquare, Calendar, User
 } from 'lucide-react'
-import { searchCode, getFileContent, fetchBranches, fetchRepoTree } from '../api/github'
+import { searchCode, getFileContent, fetchBranches, fetchRepoTree, unifiedSearch, searchCommits, searchPRs } from '../api/github'
 import { FileTree } from './FileTree'
 import { useToast } from './Toast'
 
@@ -15,6 +15,116 @@ const LANGUAGES = [
 ]
 
 const ITEMS_PER_PAGE = 3
+
+// ============ RESULT CARDS ============
+
+function CommitResult({ commit, org }) {
+  return (
+    <div className="bg-void-700/30 border border-void-600/50 rounded-xl overflow-hidden hover:border-neon-green/30 transition-all group">
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-neon-green/10 rounded-lg flex-shrink-0">
+            <GitCommit className="w-4 h-4 text-neon-green" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="text-xs px-2 py-0.5 bg-neon-green/20 text-neon-green rounded font-medium">Commit</span>
+              <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{commit.repository.name}</span>
+              <span className="text-xs font-mono text-frost-300/50">{commit.shortSha}</span>
+            </div>
+            <h3 className="text-frost-100 font-medium line-clamp-2">{commit.message}</h3>
+            <div className="flex items-center gap-4 mt-2 text-xs text-frost-300/60">
+              <span className="flex items-center gap-1">
+                <User className="w-3 h-3" /> {commit.author}
+              </span>
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> {new Date(commit.date).toLocaleDateString()}
+              </span>
+            </div>
+          </div>
+          <a 
+            href={commit.url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0"
+          >
+            <ExternalLink className="w-4 h-4 text-frost-300/60 group-hover:text-neon-green" />
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PRResult({ pr, org }) {
+  const stateColors = {
+    open: 'bg-green-500/20 text-green-400',
+    closed: 'bg-red-500/20 text-red-400',
+    merged: 'bg-purple-500/20 text-purple-400',
+  }
+  
+  return (
+    <div className="bg-void-700/30 border border-void-600/50 rounded-xl overflow-hidden hover:border-purple-400/30 transition-all group">
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-purple-500/10 rounded-lg flex-shrink-0">
+            {pr.state === 'merged' ? (
+              <GitMerge className="w-4 h-4 text-purple-400" />
+            ) : (
+              <GitPullRequest className="w-4 h-4 text-purple-400" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded font-medium">PR</span>
+              <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{pr.repository.name}</span>
+              <span className={`text-xs px-2 py-0.5 rounded capitalize ${stateColors[pr.state] || stateColors.open}`}>
+                {pr.state}
+              </span>
+              <span className="text-xs text-frost-300/50">#{pr.number}</span>
+            </div>
+            <h3 className="text-frost-100 font-medium line-clamp-2">{pr.title}</h3>
+            {pr.body && (
+              <p className="text-xs text-frost-300/50 mt-1 line-clamp-2">{pr.body}</p>
+            )}
+            <div className="flex items-center gap-4 mt-2 text-xs text-frost-300/60">
+              <span className="flex items-center gap-1">
+                <User className="w-3 h-3" /> {pr.author}
+              </span>
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> {new Date(pr.date).toLocaleDateString()}
+              </span>
+            </div>
+            {pr.labels && pr.labels.length > 0 && (
+              <div className="flex items-center gap-1 mt-2 flex-wrap">
+                {pr.labels.slice(0, 5).map(label => (
+                  <span 
+                    key={label.name}
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{ 
+                      backgroundColor: `#${label.color}20`,
+                      color: `#${label.color}`,
+                    }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <a 
+            href={pr.url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0"
+          >
+            <ExternalLink className="w-4 h-4 text-frost-300/60 group-hover:text-purple-400" />
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function CodePreview({ result, token, org, selectedBranches }) {
   const [expanded, setExpanded] = useState(false)
@@ -55,8 +165,9 @@ function CodePreview({ result, token, org, selectedBranches }) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded font-medium">{repoName}</span>
-                <span className="text-xs px-2 py-0.5 bg-electric-400/20 text-electric-400 rounded flex items-center gap-1">
+                <span className="text-xs px-2 py-0.5 bg-electric-400/20 text-electric-400 rounded font-medium">Code</span>
+                <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{repoName}</span>
+                <span className="text-xs px-2 py-0.5 bg-frost-300/10 text-frost-300/60 rounded flex items-center gap-1">
                   <GitBranch className="w-3 h-3" />{branch}
                 </span>
               </div>
@@ -174,22 +285,33 @@ function RepoFileTreeCard({ repo, tree, selectedPaths, onTogglePath, loading }) 
   )
 }
 
+// ============ QUICK SEARCH (Entire Org) ============
+
 function QuickSearch({ token, org, onResults }) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [searchTypes, setSearchTypes] = useState({ code: true, commits: true, prs: true })
   const toast = useToast()
 
   const handleQuickSearch = async (e) => {
     e.preventDefault()
     if (!query.trim() || !token || !org) return
     
+    const activeTypes = Object.entries(searchTypes).filter(([_, v]) => v).map(([k]) => k)
+    if (activeTypes.length === 0) {
+      toast.warning('Select at least one search type')
+      return
+    }
+    
     setLoading(true)
     try {
-      const results = await searchCode(token, query, org, null, {})
-      if (results.items.length === 0) {
+      const results = await unifiedSearch(token, query, org, { searchTypes: activeTypes })
+      const totalResults = results.code.items.length + results.commits.items.length + results.prs.items.length
+      
+      if (totalResults === 0) {
         toast.info('No results found', 'Try a different search term')
       } else {
-        toast.success(`Found ${results.totalCount} results`)
+        toast.success(`Found ${totalResults} results`)
       }
       onResults(results)
     } catch (err) {
@@ -199,19 +321,100 @@ function QuickSearch({ token, org, onResults }) {
     }
   }
 
+  const toggleType = (type) => {
+    setSearchTypes(prev => ({ ...prev, [type]: !prev[type] }))
+  }
+
   return (
-    <div className="bg-neon-green/10 border border-neon-green/30 rounded-xl p-4 mb-6">
-      <h3 className="text-neon-green font-medium mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4" /> Quick Search</h3>
-      <p className="text-xs text-frost-300/60 mb-3">Search across entire organization</p>
+    <div className="bg-gradient-to-br from-neon-green/10 via-electric-400/5 to-purple-500/10 border border-neon-green/30 rounded-2xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-neon-green/20 rounded-xl">
+            <Sparkles className="w-5 h-5 text-neon-green" />
+          </div>
+          <div>
+            <h3 className="text-frost-100 font-semibold">Quick Search - Entire Organization</h3>
+            <p className="text-xs text-frost-300/60">Search code, commits, and PRs across all repos</p>
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => toggleType('code')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.code ? 'bg-electric-400/20 text-electric-400 border border-electric-400/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+        >
+          <FileCode className="w-4 h-4" /> Code
+        </button>
+        <button
+          onClick={() => toggleType('commits')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.commits ? 'bg-neon-green/20 text-neon-green border border-neon-green/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+        >
+          <GitCommit className="w-4 h-4" /> Commits
+        </button>
+        <button
+          onClick={() => toggleType('prs')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.prs ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+        >
+          <GitPullRequest className="w-4 h-4" /> Pull Requests
+        </button>
+      </div>
+      
       <form onSubmit={handleQuickSearch} className="flex gap-2">
-        <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type any word..." className="flex-1 px-4 py-2 bg-void-700/50 border border-void-600/50 rounded-lg text-frost-100 placeholder-frost-300/40 text-sm focus:outline-none focus:border-neon-green/50" />
-        <button type="submit" disabled={loading || !query.trim()} className="px-4 py-2 bg-neon-green text-void-900 font-semibold rounded-lg disabled:opacity-50 flex items-center gap-2">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}Search
+        <input 
+          type="text" 
+          value={query} 
+          onChange={(e) => setQuery(e.target.value)} 
+          placeholder="Search for anything..." 
+          className="flex-1 px-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 text-sm focus:outline-none focus:border-neon-green/50 focus:ring-2 focus:ring-neon-green/25" 
+        />
+        <button 
+          type="submit" 
+          disabled={loading || !query.trim()} 
+          className="px-6 py-3 bg-gradient-to-r from-neon-green to-electric-400 text-void-900 font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2 hover:opacity-90 transition-opacity"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+          Search Org
         </button>
       </form>
     </div>
   )
 }
+
+// ============ RESULTS TABS ============
+
+function ResultsTabs({ results, activeTab, onTabChange }) {
+  const tabs = [
+    { key: 'all', label: 'All', count: results.code.items.length + results.commits.items.length + results.prs.items.length, icon: Search },
+    { key: 'code', label: 'Code', count: results.code.items.length, icon: FileCode, color: 'electric-400' },
+    { key: 'commits', label: 'Commits', count: results.commits.items.length, icon: GitCommit, color: 'neon-green' },
+    { key: 'prs', label: 'PRs', count: results.prs.items.length, icon: GitPullRequest, color: 'purple-400' },
+  ]
+  
+  return (
+    <div className="flex flex-wrap gap-2 mb-4">
+      {tabs.map(tab => (
+        <button
+          key={tab.key}
+          onClick={() => onTabChange(tab.key)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+            activeTab === tab.key 
+              ? 'bg-frost-100 text-void-900' 
+              : 'bg-void-700/50 text-frost-300/60 hover:text-frost-200 hover:bg-void-700'
+          }`}
+        >
+          <tab.icon className="w-4 h-4" />
+          {tab.label}
+          <span className={`px-2 py-0.5 rounded text-xs ${activeTab === tab.key ? 'bg-void-900/20' : 'bg-void-600/50'}`}>
+            {tab.count}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ============ MAIN COMPONENT ============
 
 export function CodeSearch({ token, org, allRepos }) {
   const [step, setStep] = useState(1)
@@ -231,6 +434,8 @@ export function CodeSearch({ token, org, allRepos }) {
   const [loading, setLoading] = useState(false)
   const [language, setLanguage] = useState('')
   const [extension, setExtension] = useState('')
+  const [searchTypes, setSearchTypes] = useState({ code: true, commits: true, prs: true })
+  const [activeResultsTab, setActiveResultsTab] = useState('all')
   
   const toast = useToast()
 
@@ -352,6 +557,10 @@ export function CodeSearch({ token, org, allRepos }) {
   const handleProceedToSearch = () => setStep(4)
   const totalSelectedPaths = Object.values(selectedPathsMap).reduce((sum, set) => sum + set.size, 0)
 
+  const toggleSearchType = (type) => {
+    setSearchTypes(prev => ({ ...prev, [type]: !prev[type] }))
+  }
+
   const handleSearch = async (e) => {
     e?.preventDefault()
     if (!query.trim()) {
@@ -359,43 +568,49 @@ export function CodeSearch({ token, org, allRepos }) {
       return
     }
     
+    const activeTypes = Object.entries(searchTypes).filter(([_, v]) => v).map(([k]) => k)
+    if (activeTypes.length === 0) {
+      toast.warning('Select at least one search type')
+      return
+    }
+    
     setLoading(true)
     setResults(null)
     
     try {
-      const allResults = []
-      let hasErrors = false
+      const allBranches = []
+      Object.entries(selectedBranchesMap).forEach(([_, branches]) => {
+        allBranches.push(...Array.from(branches))
+      })
       
-      for (const repo of selectedRepos) {
-        const repoBranches = Array.from(selectedBranchesMap[repo.name] || [])
-        const repoPaths = Array.from(selectedPathsMap[repo.name] || new Set())
-        
-        try {
-          const searchResults = await searchCode(token, query, org, repo.name, {
-            branches: repoBranches,
-            paths: repoPaths,
-            language: language || undefined,
-            extension: extension || undefined,
-          })
-          
-          if (searchResults && searchResults.items) {
-            searchResults.items.forEach(item => { item.searchedBranches = repoBranches })
-            allResults.push(...searchResults.items)
-          }
-        } catch (repoError) {
-          hasErrors = true
-          if (repoError.message?.includes('rate limit') || repoError.message?.includes('403')) {
-            toast.rateLimit()
-            break
-          }
-        }
-      }
+      const allPaths = []
+      Object.entries(selectedPathsMap).forEach(([_, paths]) => {
+        allPaths.push(...Array.from(paths))
+      })
       
-      setResults({ totalCount: allResults.length, items: allResults, incompleteResults: false })
+      const repoNames = selectedRepos.map(r => r.name)
       
-      if (allResults.length > 0) {
-        toast.success(`Found ${allResults.length} results`)
-      } else if (!hasErrors) {
+      const searchResults = await unifiedSearch(token, query, org, {
+        repos: repoNames,
+        branches: [...new Set(allBranches)],
+        paths: allPaths,
+        language: language || undefined,
+        extension: extension || undefined,
+        searchTypes: activeTypes,
+      })
+      
+      // Add branch info to results
+      searchResults.code.items.forEach(item => {
+        item.searchedBranches = allBranches
+      })
+      
+      setResults(searchResults)
+      
+      const totalResults = searchResults.code.items.length + searchResults.commits.items.length + searchResults.prs.items.length
+      
+      if (totalResults > 0) {
+        toast.success(`Found ${totalResults} results`)
+      } else {
         toast.info('No results found', 'Try different search terms')
       }
     } catch (err) {
@@ -420,6 +635,13 @@ export function CodeSearch({ token, org, allRepos }) {
     setBranchSearch('')
     setBranchPage(0)
     setFilePage(0)
+    setActiveResultsTab('all')
+  }
+
+  const handleQuickSearchResults = (results) => {
+    setResults(results)
+    setStep(4)
+    setActiveResultsTab('all')
   }
 
   const branchTotalPages = Math.ceil(selectedRepos.length / ITEMS_PER_PAGE)
@@ -427,15 +649,35 @@ export function CodeSearch({ token, org, allRepos }) {
   const fileTotalPages = Math.ceil(selectedRepos.length / ITEMS_PER_PAGE)
   const filePageRepos = selectedRepos.slice(filePage * ITEMS_PER_PAGE, (filePage + 1) * ITEMS_PER_PAGE)
 
+  // Get filtered results based on active tab
+  const getFilteredResults = () => {
+    if (!results) return []
+    
+    switch (activeResultsTab) {
+      case 'code':
+        return results.code.items.map(item => ({ ...item, resultType: 'code' }))
+      case 'commits':
+        return results.commits.items.map(item => ({ ...item, resultType: 'commit' }))
+      case 'prs':
+        return results.prs.items.map(item => ({ ...item, resultType: 'pr' }))
+      default:
+        return [
+          ...results.commits.items.map(item => ({ ...item, resultType: 'commit' })),
+          ...results.prs.items.map(item => ({ ...item, resultType: 'pr' })),
+          ...results.code.items.map(item => ({ ...item, resultType: 'code' })),
+        ]
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <QuickSearch token={token} org={org} onResults={(r) => { setResults(r); setStep(4) }} />
+      <QuickSearch token={token} org={org} onResults={handleQuickSearchResults} />
 
       <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-neon-pink to-purple-500 rounded-xl"><Code2 className="w-5 h-5 text-white" /></div>
-            <div><h2 className="text-lg font-display font-semibold text-frost-100">Advanced Code Search</h2><p className="text-sm text-frost-300/60">Select repos → branches → files → search</p></div>
+            <div><h2 className="text-lg font-display font-semibold text-frost-100">Advanced Search</h2><p className="text-sm text-frost-300/60">Select repos → branches → files → search code, commits & PRs</p></div>
           </div>
           {step > 1 && <button onClick={handleReset} className="flex items-center gap-2 px-3 py-1.5 text-sm text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50 rounded-lg transition-all"><RotateCcw className="w-4 h-4" />Start Over</button>}
         </div>
@@ -507,9 +749,32 @@ export function CodeSearch({ token, org, allRepos }) {
               {totalSelectedPaths > 0 && <span className="px-2 py-1 bg-neon-pink/20 text-neon-pink rounded">{totalSelectedPaths} paths</span>}
               <button onClick={() => setStep(1)} className="ml-auto text-xs text-frost-300/60 hover:text-frost-200 transition-colors">Modify</button>
             </div>
+            
+            <div className="flex flex-wrap gap-2 mb-2">
+              <span className="text-sm text-frost-300/60 self-center">Search in:</span>
+              <button
+                onClick={() => toggleSearchType('code')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.code ? 'bg-electric-400/20 text-electric-400 border border-electric-400/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+              >
+                <FileCode className="w-4 h-4" /> Code
+              </button>
+              <button
+                onClick={() => toggleSearchType('commits')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.commits ? 'bg-neon-green/20 text-neon-green border border-neon-green/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+              >
+                <GitCommit className="w-4 h-4" /> Commits
+              </button>
+              <button
+                onClick={() => toggleSearchType('prs')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${searchTypes.prs ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' : 'bg-void-700/30 text-frost-300/60 border border-void-600/50'}`}
+              >
+                <GitPullRequest className="w-4 h-4" /> Pull Requests
+              </button>
+            </div>
+            
             <form onSubmit={handleSearch} className="space-y-4">
               <div className="flex gap-2">
-                <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-frost-300/40" /><input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search for code..." className="w-full pl-12 pr-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-neon-pink/50 focus:ring-2 focus:ring-neon-pink/25 transition-all" autoFocus /></div>
+                <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-frost-300/40" /><input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search for code, commit messages, PR titles..." className="w-full pl-12 pr-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-neon-pink/50 focus:ring-2 focus:ring-neon-pink/25 transition-all" autoFocus /></div>
                 <button type="submit" disabled={loading || !query.trim()} className="px-6 py-3 bg-gradient-to-r from-neon-pink to-purple-500 hover:from-neon-pink/90 hover:to-purple-500/90 rounded-xl text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">{loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}Search</button>
               </div>
               <div className="flex gap-3">
@@ -523,11 +788,29 @@ export function CodeSearch({ token, org, allRepos }) {
 
       {results && (
         <div className="space-y-4">
-          <h3 className="text-frost-200 font-medium flex items-center gap-2"><Sparkles className="w-4 h-4 text-neon-pink" />{results.totalCount.toLocaleString()} results</h3>
-          {results.items.length === 0 ? (
-            <div className="text-center py-12 text-frost-300/60"><Folder className="w-12 h-12 mx-auto mb-4 opacity-50" /><p>No code matches found</p></div>
+          <div className="flex items-center justify-between">
+            <h3 className="text-frost-200 font-medium flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-neon-pink" />
+              Search Results
+            </h3>
+          </div>
+          
+          <ResultsTabs results={results} activeTab={activeResultsTab} onTabChange={setActiveResultsTab} />
+          
+          {getFilteredResults().length === 0 ? (
+            <div className="text-center py-12 text-frost-300/60"><Folder className="w-12 h-12 mx-auto mb-4 opacity-50" /><p>No results in this category</p></div>
           ) : (
-            <div className="space-y-3">{results.items.map((result, i) => <CodePreview key={`${result.repository?.fullName || 'x'}-${result.path}-${i}`} result={result} token={token} org={org} selectedBranches={result.searchedBranches || []} />)}</div>
+            <div className="space-y-3">
+              {getFilteredResults().map((result, i) => {
+                if (result.resultType === 'commit') {
+                  return <CommitResult key={`commit-${result.sha}-${i}`} commit={result} org={org} />
+                }
+                if (result.resultType === 'pr') {
+                  return <PRResult key={`pr-${result.number}-${i}`} pr={result} org={org} />
+                }
+                return <CodePreview key={`code-${result.path}-${i}`} result={result} token={token} org={org} selectedBranches={result.searchedBranches || []} />
+              })}
+            </div>
           )}
         </div>
       )}
