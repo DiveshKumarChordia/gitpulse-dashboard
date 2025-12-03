@@ -73,11 +73,23 @@ export function Leaderboard({
   onMemberClick,
 }) {
   const [metric, setMetric] = useState('total')
-  const [timeFilter, setTimeFilter] = useState('month')
+  const [timeFilter, setTimeFilter] = useState('all') // Default to 'all' to show current stats
   
-  // Recalculate stats based on time filter
+  // Use stats directly when not filtering, or recalculate when filtering
   const filteredStats = useMemo(() => {
-    if (!activities || !stats) return stats || []
+    if (!stats || stats.length === 0) return []
+    
+    // If not showing filters or filter is 'all', use stats as-is
+    if (!showFilters || timeFilter === 'all') {
+      return stats.map(s => ({
+        ...s,
+        reposActive: typeof s.reposActive === 'object' ? s.reposActive.size : (s.reposActive || 0),
+        total: s.total || (s.commits + s.prs + (s.merges || 0) + s.reviews + s.comments),
+      }))
+    }
+    
+    // Only recalculate if we have activities and a time filter
+    if (!activities || activities.length === 0) return stats
     
     const filterDate = TIME_FILTERS.find(f => f.key === timeFilter)?.getDate()
     if (!filterDate) return stats
@@ -103,7 +115,7 @@ export function Leaderboard({
     
     activities.forEach(a => {
       if (!isAfter(new Date(a.date), filterDate)) return
-      if (!recalc[a.author]) return
+      if (!a.author || !recalc[a.author]) return
       
       const s = recalc[a.author]
       if (a.repo) s.reposActive.add(a.repo)
@@ -127,9 +139,9 @@ export function Leaderboard({
     return Object.values(recalc).map(s => ({
       ...s,
       reposActive: typeof s.reposActive === 'object' ? s.reposActive.size : s.reposActive,
-      total: s.commits + s.prs + s.merges + s.reviews + s.comments,
+      total: s.commits + s.prs + (s.merges || 0) + s.reviews + s.comments,
     }))
-  }, [stats, activities, timeFilter])
+  }, [stats, activities, timeFilter, showFilters])
   
   // Sort by selected metric
   const sorted = useMemo(() => {

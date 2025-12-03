@@ -11,7 +11,7 @@ import {
   Calendar, TrendingUp, Award, Activity as ActivityIcon
 } from 'lucide-react'
 import { format, formatDistanceToNow, isToday, isYesterday, isThisWeek, isAfter } from 'date-fns'
-import { fetchUserEvents, calculateStatsFromActivities, ACTIVITY_TYPES, ACTIVITY_CONFIG as API_ACTIVITY_CONFIG, DEFAULT_ACTIVITY_CONFIG } from '../../api/github/activities'
+import { fetchUserEvents, fetchUserActivitiesInOrg, calculateStatsFromActivities, ACTIVITY_TYPES, ACTIVITY_CONFIG as API_ACTIVITY_CONFIG, DEFAULT_ACTIVITY_CONFIG } from '../../api/github/activities'
 import { Heatmap } from './Heatmap'
 import { TIME_FILTERS } from './Leaderboard'
 
@@ -252,7 +252,7 @@ function ProfileActivityCard({ activity }) {
 }
 
 // ============ MAIN COMPONENT ============
-export function MemberProfile({ member, token, org, onBack }) {
+export function MemberProfile({ member, token, org, onBack, repos = [] }) {
   const [activities, setActivities] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -266,11 +266,46 @@ export function MemberProfile({ member, token, org, onBack }) {
       setLoading(true)
       setError(null)
       try {
-        const userActivities = await fetchUserEvents(token, member.login)
+        // Use comprehensive fetching that searches through org repos
+        const userActivities = await fetchUserActivitiesInOrg(token, org, member.login, repos)
         setActivities(userActivities)
         
-        const allStats = calculateStatsFromActivities(userActivities)
-        setStats(allStats.find(s => s.login === member.login) || null)
+        // Calculate stats from activities
+        const s = {
+          login: member.login,
+          avatarUrl: member.avatarUrl,
+          commits: 0,
+          prs: 0,
+          merges: 0,
+          reviews: 0,
+          comments: 0,
+          releases: 0,
+          reposActive: new Set(),
+          total: 0,
+        }
+        
+        for (const act of userActivities) {
+          if (act.repo) s.reposActive.add(act.repo)
+          
+          if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+            s.commits += act.commitCount || 1
+          } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+            s.prs++
+          } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+            s.merges++
+          } else if (act.type?.includes('review')) {
+            s.reviews++
+          } else if (act.type?.includes('comment')) {
+            s.comments++
+          } else if (act.type?.includes('release')) {
+            s.releases++
+          }
+        }
+        
+        s.reposActive = s.reposActive.size
+        s.total = s.commits + s.prs + s.merges + s.reviews + s.comments
+        
+        setStats(s)
       } catch (e) {
         setError(e.message)
       } finally {
@@ -278,7 +313,7 @@ export function MemberProfile({ member, token, org, onBack }) {
       }
     }
     load()
-  }, [member, token])
+  }, [member, token, org, repos])
   
   const filteredActivities = useMemo(() => {
     let filtered = activities

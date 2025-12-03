@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { Loader2, UserCheck, Activity } from 'lucide-react'
-import { isSameDay } from 'date-fns'
+import { Loader2, UserCheck, Activity, Clock } from 'lucide-react'
+import { isSameDay, subHours } from 'date-fns'
 import { fetchUserEvents, calculateStatsFromActivities, ACTIVITY_TYPES } from '../../api/github/activities'
 import { ActivityCard } from './ActivityCard'
 import { Leaderboard } from './Leaderboard'
@@ -38,10 +38,10 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
       
       try {
         const allActs = []
-        let processed = 0
+        const memberStatsMap = {}
         
         // Process in parallel batches
-        const BATCH_SIZE = 5
+        const BATCH_SIZE = 3
         for (let i = 0; i < members.length; i += BATCH_SIZE) {
           const batch = members.slice(i, i + BATCH_SIZE)
           setProgress({
@@ -50,14 +50,48 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
           })
           
           const results = await Promise.all(
-            batch.map(member => fetchUserEvents(token, member.login))
+            batch.map(async (member) => {
+              const memberActivities = await fetchUserEvents(token, member.login)
+              return { member, activities: memberActivities }
+            })
           )
           
-          for (const memberActivities of results) {
-            allActs.push(...memberActivities)
+          for (const { member, activities: memberActivities } of results) {
+            // Initialize stats for this member
+            if (!memberStatsMap[member.login]) {
+              memberStatsMap[member.login] = {
+                login: member.login,
+                avatarUrl: member.avatarUrl,
+                commits: 0,
+                prs: 0,
+                merges: 0,
+                reviews: 0,
+                comments: 0,
+                reposActive: new Set(),
+                total: 0,
+              }
+            }
+            
+            // Count activities
+            for (const act of memberActivities) {
+              allActs.push(act)
+              
+              const s = memberStatsMap[member.login]
+              if (act.repo) s.reposActive.add(act.repo)
+              
+              if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+                s.commits += act.commitCount || 1
+              } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+                s.prs++
+              } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+                s.merges++
+              } else if (act.type?.includes('review')) {
+                s.reviews++
+              } else if (act.type?.includes('comment')) {
+                s.comments++
+              }
+            }
           }
-          
-          processed += batch.length
         }
         
         // Sort and dedupe
@@ -69,8 +103,15 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
           return true
         })
         
+        // Finalize stats
+        const finalStats = Object.values(memberStatsMap).map(s => ({
+          ...s,
+          reposActive: s.reposActive.size,
+          total: s.commits + s.prs + s.merges + s.reviews + s.comments,
+        })).sort((a, b) => b.total - a.total)
+        
         setActivities(unique)
-        setStats(calculateStatsFromActivities(unique))
+        setStats(finalStats)
         toast.success(`Loaded ${unique.length} activities from ${members.length} members`)
       } catch (e) {
         toast.apiError(e.message)
@@ -125,6 +166,13 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
   
   return (
     <div className="space-y-6">
+      {/* Info Header */}
+      <div className="flex items-center gap-3 p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+        <UserCheck className="w-5 h-5 text-purple-400" />
+        <span className="text-purple-400 font-medium">Showing recent activities from all team members</span>
+        <span className="text-frost-300/50 text-sm">• {activities.length} total activities</span>
+      </div>
+      
       {/* Type Filters */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-frost-300/60 text-sm">Filter:</span>
@@ -153,6 +201,7 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
         activities={activities} 
         selectedDate={selectedDate} 
         onDateSelect={setSelectedDate}
+        months={2}
       />
       
       {/* Main Content */}
@@ -160,7 +209,7 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
         {/* Activity Feed */}
         <div className="xl:col-span-2 space-y-4">
           <h3 className="text-frost-100 font-bold text-lg flex items-center gap-2">
-            <UserCheck className="w-5 h-5 text-purple-400" />
+            <Activity className="w-5 h-5 text-purple-400" />
             Member Activities
             <span className="text-sm px-3 py-1 bg-void-600/50 rounded-full text-frost-300/60 font-normal">
               {filteredActivities.length} activities
@@ -184,12 +233,6 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
                 <p className="text-sm mt-1">Try changing the filters</p>
               </div>
             )}
-            
-            {filteredActivities.length > 150 && (
-              <div className="text-center py-4 text-frost-300/50 text-sm">
-                Showing 150 of {filteredActivities.length} activities
-              </div>
-            )}
           </div>
         </div>
         
@@ -199,6 +242,7 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
           activities={activities} 
           title="Member Rankings"
           onMemberClick={onMemberClick}
+          showFilters={false}
         />
       </div>
     </div>
@@ -206,4 +250,3 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
 }
 
 export default TeamMembersSection
-

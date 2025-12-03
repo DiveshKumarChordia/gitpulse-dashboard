@@ -201,6 +201,7 @@ export function TeamsDashboard({ token, org }) {
         member={selectedMember} 
         token={token} 
         org={org} 
+        repos={repos}
         onBack={() => setSelectedMember(null)} 
       />
     )

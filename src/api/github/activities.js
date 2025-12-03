@@ -253,6 +253,72 @@ export async function fetchRepoEvents(token, org, repoName) {
   return activities
 }
 
+// ============ FETCH REPO EVENTS - LAST 24 HOURS ONLY ============
+export async function fetchRepoEventsLast24Hours(token, org, repoName) {
+  const activities = []
+  const cutoffDate = new Date()
+  cutoffDate.setHours(cutoffDate.getHours() - 24)
+  
+  try {
+    // Fetch repository events
+    const events = await fetchWithAuth(
+      `${GITHUB_API_BASE}/repos/${org}/${repoName}/events?per_page=50`,
+      token
+    )
+    
+    if (events) {
+      for (const event of events) {
+        const eventDate = new Date(event.created_at)
+        if (eventDate < cutoffDate) continue // Skip old events
+        
+        const activity = parseGitHubEvent(event, org, repoName)
+        if (activity) activities.push(activity)
+      }
+    }
+  } catch (e) {
+    console.warn(`Failed to fetch events for ${repoName}:`, e)
+  }
+  
+  return activities
+}
+
+// ============ FETCH TEAM REPO ACTIVITIES - LAST 24 HOURS ============
+export async function fetchTeamRepoActivitiesLast24Hours(token, org, repos, onProgress) {
+  const allActivities = []
+  const cutoffDate = new Date()
+  cutoffDate.setHours(cutoffDate.getHours() - 24)
+  
+  const BATCH_SIZE = 5
+  for (let i = 0; i < repos.length; i += BATCH_SIZE) {
+    const batch = repos.slice(i, i + BATCH_SIZE)
+    onProgress?.({
+      status: `Checking ${batch.map(r => r.name).join(', ')}...`,
+      percentage: Math.round((i / repos.length) * 100)
+    })
+    
+    const results = await Promise.all(
+      batch.map(repo => fetchRepoEventsLast24Hours(token, org, repo.name))
+    )
+    
+    for (const activities of results) {
+      allActivities.push(...activities)
+    }
+  }
+  
+  // Sort and dedupe
+  allActivities.sort((a, b) => new Date(b.date) - new Date(a.date))
+  const seen = new Set()
+  const unique = allActivities.filter(a => {
+    if (seen.has(a.id)) return false
+    seen.add(a.id)
+    return true
+  })
+  
+  onProgress?.({ status: 'Complete!', percentage: 100 })
+  
+  return unique
+}
+
 // ============ PARSE GITHUB EVENT ============
 function parseGitHubEvent(event, org, repoName) {
   const base = {
@@ -452,6 +518,53 @@ export async function fetchUserEvents(token, username) {
   const activities = []
   
   try {
+    // Try user events first (works best for authenticated user)
+    const events = await fetchWithAuth(
+      `${GITHUB_API_BASE}/users/${username}/events?per_page=100`,
+      token
+    )
+    
+    if (events && events.length > 0) {
+      for (const event of events) {
+        const repoName = event.repo?.name?.split('/')[1] || 'unknown'
+        const org = event.repo?.name?.split('/')[0] || 'unknown'
+        const activity = parseGitHubEvent(event, org, repoName)
+        if (activity) activities.push(activity)
+      }
+    }
+    
+    // Also try public events if user events didn't return much
+    if (events?.length < 10) {
+      const publicEvents = await fetchWithAuth(
+        `${GITHUB_API_BASE}/users/${username}/events/public?per_page=100`,
+        token
+      )
+      
+      if (publicEvents) {
+        for (const event of publicEvents) {
+          const repoName = event.repo?.name?.split('/')[1] || 'unknown'
+          const org = event.repo?.name?.split('/')[0] || 'unknown'
+          const activity = parseGitHubEvent(event, org, repoName)
+          if (activity && !activities.find(a => a.id === activity.id)) {
+            activities.push(activity)
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`Failed to fetch events for ${username}:`, e)
+  }
+  
+  return activities
+}
+
+// ============ FETCH USER ACTIVITIES FROM ORG REPOS ============
+// More comprehensive - searches through org repos for user's activities
+export async function fetchUserActivitiesInOrg(token, org, username, repos) {
+  const activities = []
+  
+  // First try user events
+  try {
     const events = await fetchWithAuth(
       `${GITHUB_API_BASE}/users/${username}/events?per_page=100`,
       token
@@ -460,14 +573,86 @@ export async function fetchUserEvents(token, username) {
     if (events) {
       for (const event of events) {
         const repoName = event.repo?.name?.split('/')[1] || 'unknown'
-        const org = event.repo?.name?.split('/')[0] || 'unknown'
-        const activity = parseGitHubEvent(event, org, repoName)
+        const eventOrg = event.repo?.name?.split('/')[0] || 'unknown'
+        const activity = parseGitHubEvent(event, eventOrg, repoName)
         if (activity) activities.push(activity)
       }
     }
-  } catch (e) {
-    console.warn(`Failed to fetch events for ${username}:`, e)
+  } catch (e) { /* continue */ }
+  
+  // If not enough from events API, search through repos
+  if (activities.length < 20 && repos && repos.length > 0) {
+    const reposToCheck = repos.slice(0, 10) // Limit to 10 repos for speed
+    
+    for (const repo of reposToCheck) {
+      const repoName = typeof repo === 'string' ? repo : repo.name
+      
+      // Get commits by user
+      try {
+        const commits = await fetchWithAuth(
+          `${GITHUB_API_BASE}/repos/${org}/${repoName}/commits?author=${username}&per_page=30`,
+          token
+        )
+        if (commits) {
+          for (const commit of commits) {
+            const exists = activities.find(a => a.sha === commit.sha)
+            if (!exists) {
+              activities.push({
+                id: `${repoName}-commit-${commit.sha}`,
+                type: ACTIVITY_TYPES.COMMIT,
+                repo: repoName,
+                repoFullName: `${org}/${repoName}`,
+                message: commit.commit.message.split('\n')[0],
+                fullMessage: commit.commit.message,
+                date: commit.commit.author?.date || commit.commit.committer?.date,
+                sha: commit.sha,
+                shortSha: commit.sha.substring(0, 7),
+                url: commit.html_url,
+                author: username,
+                avatarUrl: commit.author?.avatar_url,
+              })
+            }
+          }
+        }
+      } catch (e) { /* continue */ }
+      
+      // Get PRs by user
+      try {
+        const prs = await fetchWithAuth(
+          `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls?state=all&creator=${username}&per_page=20`,
+          token
+        )
+        if (prs) {
+          for (const pr of prs) {
+            const exists = activities.find(a => a.number === pr.number && a.type?.includes('pr'))
+            if (!exists) {
+              activities.push({
+                id: `${repoName}-pr-${pr.id}`,
+                type: pr.merged_at ? ACTIVITY_TYPES.PR_MERGED : pr.state === 'open' ? ACTIVITY_TYPES.PR_OPENED : ACTIVITY_TYPES.PR_CLOSED,
+                repo: repoName,
+                repoFullName: `${org}/${repoName}`,
+                message: pr.title,
+                body: pr.body,
+                date: pr.created_at,
+                mergedAt: pr.merged_at,
+                number: pr.number,
+                url: pr.html_url,
+                state: pr.merged_at ? 'merged' : pr.state,
+                author: username,
+                avatarUrl: pr.user?.avatar_url,
+                additions: pr.additions,
+                deletions: pr.deletions,
+                labels: pr.labels?.map(l => ({ name: l.name, color: l.color })),
+              })
+            }
+          }
+        }
+      } catch (e) { /* continue */ }
+    }
   }
+  
+  // Sort by date
+  activities.sort((a, b) => new Date(b.date) - new Date(a.date))
   
   return activities
 }

@@ -1,12 +1,12 @@
 /**
  * Team Repos Section Component
- * Shows all activities in team's repositories
+ * Shows all activities in team's repositories - LAST 24 HOURS
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { Loader2, Activity, Filter } from 'lucide-react'
-import { isSameDay } from 'date-fns'
-import { fetchComprehensiveRepoActivities, calculateStatsFromActivities, ACTIVITY_TYPES } from '../../api/github/activities'
+import { Loader2, Activity, Clock } from 'lucide-react'
+import { isSameDay, isAfter, subHours } from 'date-fns'
+import { fetchTeamRepoActivitiesLast24Hours, calculateStatsFromActivities, ACTIVITY_TYPES } from '../../api/github/activities'
 import { ActivityCard } from './ActivityCard'
 import { Leaderboard } from './Leaderboard'
 import { Heatmap } from './Heatmap'
@@ -26,48 +26,25 @@ const TYPE_FILTERS = [
 ]
 
 export function TeamReposSection({ token, org, repos, onMemberClick }) {
-  const [allActivities, setAllActivities] = useState([])
-  const [allStats, setAllStats] = useState([])
+  const [activities, setActivities] = useState([])
+  const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState(null)
-  const [selectedRepo, setSelectedRepo] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [typeFilter, setTypeFilter] = useState('all')
   const toast = useToast()
   
-  // Load all repos initially
+  // Load activities from last 24 hours
   useEffect(() => {
     const load = async () => {
       if (!repos.length) return
       setLoading(true)
       
       try {
-        const allActs = []
-        let processed = 0
-        
-        for (const repo of repos) {
-          setProgress({ 
-            status: `Loading ${repo.name}...`, 
-            percentage: Math.round((processed / repos.length) * 100) 
-          })
-          
-          const activities = await fetchComprehensiveRepoActivities(token, org, repo.name, () => {})
-          allActs.push(...activities)
-          processed++
-        }
-        
-        // Sort and dedupe
-        allActs.sort((a, b) => new Date(b.date) - new Date(a.date))
-        const seen = new Set()
-        const unique = allActs.filter(a => {
-          if (seen.has(a.id)) return false
-          seen.add(a.id)
-          return true
-        })
-        
-        setAllActivities(unique)
-        setAllStats(calculateStatsFromActivities(unique))
-        toast.success(`Loaded ${unique.length} activities from ${repos.length} repos`)
+        const allActivities = await fetchTeamRepoActivitiesLast24Hours(token, org, repos, setProgress)
+        setActivities(allActivities)
+        setStats(calculateStatsFromActivities(allActivities))
+        toast.success(`Loaded ${allActivities.length} activities from last 24 hours`)
       } catch (e) {
         toast.apiError(e.message)
       } finally {
@@ -78,40 +55,6 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
     
     load()
   }, [token, org, repos])
-  
-  // Load single repo when selected
-  const [repoActivities, setRepoActivities] = useState([])
-  const [repoStats, setRepoStats] = useState([])
-  const [loadingRepo, setLoadingRepo] = useState(false)
-  
-  useEffect(() => {
-    if (!selectedRepo) {
-      setRepoActivities([])
-      setRepoStats([])
-      return
-    }
-    
-    const load = async () => {
-      setLoadingRepo(true)
-      try {
-        const activities = await fetchComprehensiveRepoActivities(token, org, selectedRepo.name, setProgress)
-        setRepoActivities(activities)
-        setRepoStats(calculateStatsFromActivities(activities))
-      } catch (e) {
-        toast.apiError(e.message)
-      } finally {
-        setLoadingRepo(false)
-        setProgress(null)
-      }
-    }
-    
-    load()
-  }, [selectedRepo, token, org])
-  
-  // Use filtered data
-  const activities = selectedRepo ? repoActivities : allActivities
-  const stats = selectedRepo ? repoStats : allStats
-  const isLoading = loading || loadingRepo
   
   // Apply filters
   const filteredActivities = useMemo(() => {
@@ -155,14 +98,15 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
   
   return (
     <div className="space-y-6">
+      {/* Header with 24h indicator */}
+      <div className="flex items-center gap-3 p-4 bg-yellow-400/10 border border-yellow-400/30 rounded-xl">
+        <Clock className="w-5 h-5 text-yellow-400" />
+        <span className="text-yellow-400 font-medium">Showing activities from the last 24 hours</span>
+        <span className="text-frost-300/50 text-sm">• {activities.length} total activities</span>
+      </div>
+      
       {/* Controls */}
       <div className="flex items-center gap-4 flex-wrap">
-        <RepoSelector 
-          repos={repos} 
-          selectedRepo={selectedRepo} 
-          onSelect={setSelectedRepo} 
-        />
-        
         <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-xl border border-void-600/50">
           {TYPE_FILTERS.map(t => (
             <button 
@@ -178,23 +122,17 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
             </button>
           ))}
         </div>
-        
-        {loadingRepo && (
-          <div className="flex items-center gap-2 text-frost-300/60">
-            <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
-            <span className="text-sm">Loading repo...</span>
-          </div>
-        )}
       </div>
       
       {/* Stats Summary */}
       <StatsCards stats={stats} type="repo" />
       
-      {/* Heatmap */}
+      {/* Heatmap - just for today */}
       <Heatmap 
         activities={activities} 
         selectedDate={selectedDate} 
         onDateSelect={setSelectedDate}
+        months={1}
       />
       
       {/* Main Content */}
@@ -222,14 +160,8 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
             {filteredActivities.length === 0 && (
               <div className="text-center py-16 text-frost-300/50">
                 <Activity className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                <p className="text-lg">No activities found</p>
-                <p className="text-sm mt-1">Try changing the filters</p>
-              </div>
-            )}
-            
-            {filteredActivities.length > 150 && (
-              <div className="text-center py-4 text-frost-300/50 text-sm">
-                Showing 150 of {filteredActivities.length} activities
+                <p className="text-lg">No activities in the last 24 hours</p>
+                <p className="text-sm mt-1">Check back later for new updates</p>
               </div>
             )}
           </div>
@@ -239,8 +171,9 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
         <Leaderboard 
           stats={stats} 
           activities={activities} 
-          title="Top Contributors"
+          title="Top Contributors (24h)"
           onMemberClick={onMemberClick}
+          showFilters={false}
         />
       </div>
     </div>
@@ -248,4 +181,3 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
 }
 
 export default TeamReposSection
-
