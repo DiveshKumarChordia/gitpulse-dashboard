@@ -7,6 +7,7 @@ export default async function handler(request) {
   const baseUrl = `${url.protocol}//${url.host}`;
   
   const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
   const oauthError = url.searchParams.get('error');
 
   if (oauthError) {
@@ -17,11 +18,24 @@ export default async function handler(request) {
     return Response.redirect(`${baseUrl}/?error=no_code`, 302);
   }
 
-  const clientId = process.env.GITHUB_CLIENT_ID;
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  // Parse state to get client credentials
+  let clientId = process.env.GITHUB_CLIENT_ID;
+  let clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  
+  if (state) {
+    try {
+      const stateData = JSON.parse(atob(state));
+      if (stateData.user_provided && stateData.client_id) {
+        clientId = stateData.client_id;
+        clientSecret = stateData.client_secret;
+      }
+    } catch (e) {
+      console.error('Failed to parse state:', e);
+    }
+  }
 
   if (!clientId || !clientSecret) {
-    return Response.redirect(`${baseUrl}/?error=missing_env_config`, 302);
+    return Response.redirect(`${baseUrl}/?error=missing_credentials`, 302);
   }
 
   try {
@@ -97,7 +111,6 @@ export default async function handler(request) {
       orgs: orgs,
     };
 
-    // Encode as base64
     const encoded = btoa(JSON.stringify(authData));
     
     return Response.redirect(`${baseUrl}/?auth=${encoded}`, 302);

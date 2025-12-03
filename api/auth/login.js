@@ -3,22 +3,30 @@ export const config = {
 };
 
 export default async function handler(request) {
-  const clientId = process.env.GITHUB_CLIENT_ID;
+  const url = new URL(request.url);
+  
+  // Get client ID from query param (user-provided) or env var
+  const clientId = url.searchParams.get('client_id') || process.env.GITHUB_CLIENT_ID;
   
   if (!clientId) {
     return new Response(
-      JSON.stringify({ error: 'GITHUB_CLIENT_ID not configured' }), 
+      JSON.stringify({ error: 'No GitHub Client ID provided' }), 
       { 
-        status: 500,
+        status: 400,
         headers: { 'Content-Type': 'application/json' }
       }
     );
   }
 
-  // Get the host from the request
-  const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
   const redirectUri = `${baseUrl}/api/auth/callback`;
+  
+  // Store client info in state param (will be passed back in callback)
+  const state = btoa(JSON.stringify({
+    client_id: clientId,
+    client_secret: url.searchParams.get('client_secret') || '',
+    user_provided: !!url.searchParams.get('client_id'),
+  }));
   
   const scope = 'repo read:org read:user';
   
@@ -26,6 +34,7 @@ export default async function handler(request) {
   githubAuthUrl.searchParams.set('client_id', clientId);
   githubAuthUrl.searchParams.set('redirect_uri', redirectUri);
   githubAuthUrl.searchParams.set('scope', scope);
+  githubAuthUrl.searchParams.set('state', state);
   
   return Response.redirect(githubAuthUrl.toString(), 302);
 }
