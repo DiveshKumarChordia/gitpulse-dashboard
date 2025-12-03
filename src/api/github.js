@@ -683,60 +683,158 @@ async function fetchUserPRComments(token, org, username) {
   } catch (e) { return [] }
 }
 
-// ============ TEAM REPO ACTIVITIES (Activities in team's repos by ANYONE) ============
+// ============ TEAM REPO ACTIVITIES (ALL activities in team's repos) ============
 
-async function fetchRepoActivities(token, org, repoName) {
+async function fetchRepoActivitiesDetailed(token, org, repoName) {
   const activities = []
   
-  // Fetch recent commits in repo
+  // Fetch commits
   try {
     const response = await fetch(
-      `${GITHUB_API_BASE}/repos/${org}/${repoName}/commits?per_page=50`,
+      `${GITHUB_API_BASE}/repos/${org}/${repoName}/commits?per_page=100`,
       { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' } }
     )
     if (response.ok) {
       const commits = await response.json()
       for (const commit of commits) {
         activities.push({
-          id: `repo-${repoName}-${commit.sha}`,
+          id: `repo-${repoName}-commit-${commit.sha}`,
           type: 'commit',
           repo: repoName,
           repoFullName: `${org}/${repoName}`,
           message: commit.commit.message.split('\n')[0],
+          fullMessage: commit.commit.message,
           date: commit.commit.author?.date || commit.commit.committer?.date,
           sha: commit.sha,
           shortSha: commit.sha.substring(0, 7),
           url: commit.html_url,
           author: commit.author?.login || commit.commit.author?.name || 'unknown',
           avatarUrl: commit.author?.avatar_url,
+          stats: commit.stats,
         })
       }
     }
   } catch (e) { /* continue */ }
   
-  // Fetch PRs in repo
+  // Fetch ALL PRs with details
   try {
     const response = await fetch(
-      `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls?state=all&sort=updated&direction=desc&per_page=30`,
+      `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls?state=all&sort=updated&direction=desc&per_page=50`,
       { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' } }
     )
     if (response.ok) {
       const prs = await response.json()
       for (const pr of prs) {
+        // PR created
         activities.push({
           id: `repo-${repoName}-pr-${pr.id}`,
           type: 'pr',
+          subType: pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'opened',
           repo: repoName,
           repoFullName: `${org}/${repoName}`,
           message: pr.title,
+          body: pr.body,
           date: pr.created_at,
-          updatedAt: pr.updated_at,
+          mergedAt: pr.merged_at,
+          closedAt: pr.closed_at,
           number: pr.number,
           url: pr.html_url,
           state: pr.merged_at ? 'merged' : pr.state,
           author: pr.user?.login,
           avatarUrl: pr.user?.avatar_url,
           labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [],
+          additions: pr.additions,
+          deletions: pr.deletions,
+          changedFiles: pr.changed_files,
+        })
+        
+        // If merged, add merge event
+        if (pr.merged_at) {
+          activities.push({
+            id: `repo-${repoName}-merge-${pr.id}`,
+            type: 'merge',
+            repo: repoName,
+            repoFullName: `${org}/${repoName}`,
+            message: `Merged PR #${pr.number}: ${pr.title}`,
+            date: pr.merged_at,
+            number: pr.number,
+            url: pr.html_url,
+            author: pr.merged_by?.login || pr.user?.login,
+            avatarUrl: pr.merged_by?.avatar_url || pr.user?.avatar_url,
+            prAuthor: pr.user?.login,
+          })
+        }
+      }
+    }
+  } catch (e) { /* continue */ }
+  
+  // Fetch PR reviews
+  try {
+    const prsResponse = await fetch(
+      `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls?state=all&per_page=20`,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' } }
+    )
+    if (prsResponse.ok) {
+      const prs = await prsResponse.json()
+      for (const pr of prs.slice(0, 10)) {
+        try {
+          const reviewsResponse = await fetch(
+            `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls/${pr.number}/reviews`,
+            { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' } }
+          )
+          if (reviewsResponse.ok) {
+            const reviews = await reviewsResponse.json()
+            for (const review of reviews) {
+              const reviewType = review.state === 'APPROVED' ? 'approved' : 
+                                 review.state === 'CHANGES_REQUESTED' ? 'changes_requested' : 'reviewed'
+              activities.push({
+                id: `repo-${repoName}-review-${review.id}`,
+                type: 'review',
+                subType: reviewType,
+                repo: repoName,
+                repoFullName: `${org}/${repoName}`,
+                message: reviewType === 'approved' ? `Approved PR #${pr.number}: ${pr.title}` :
+                         reviewType === 'changes_requested' ? `Requested changes on PR #${pr.number}: ${pr.title}` :
+                         `Reviewed PR #${pr.number}: ${pr.title}`,
+                body: review.body,
+                date: review.submitted_at,
+                number: pr.number,
+                url: review.html_url || pr.html_url,
+                author: review.user?.login,
+                avatarUrl: review.user?.avatar_url,
+                prTitle: pr.title,
+                prAuthor: pr.user?.login,
+                reviewState: review.state,
+              })
+            }
+          }
+        } catch (e) { /* continue */ }
+      }
+    }
+  } catch (e) { /* continue */ }
+  
+  // Fetch issue/PR comments
+  try {
+    const response = await fetch(
+      `${GITHUB_API_BASE}/repos/${org}/${repoName}/issues/comments?sort=created&direction=desc&per_page=50`,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' } }
+    )
+    if (response.ok) {
+      const comments = await response.json()
+      for (const comment of comments) {
+        const issueNumber = comment.issue_url.split('/').pop()
+        activities.push({
+          id: `repo-${repoName}-comment-${comment.id}`,
+          type: 'comment',
+          repo: repoName,
+          repoFullName: `${org}/${repoName}`,
+          message: `Commented on #${issueNumber}`,
+          body: comment.body,
+          date: comment.created_at,
+          url: comment.html_url,
+          author: comment.user?.login,
+          avatarUrl: comment.user?.avatar_url,
+          issueNumber: parseInt(issueNumber),
         })
       }
     }
@@ -745,28 +843,28 @@ async function fetchRepoActivities(token, org, repoName) {
   return activities
 }
 
-// Fetch all activities in team's repos (by anyone)
+// Fetch all activities in team's repos (by anyone) - DETAILED VERSION
 export async function fetchTeamRepoActivities(token, org, repos, onProgress) {
   const allActivities = []
   const contributorStats = {}
+  const contributorLastActive = {}
   
-  const BATCH_SIZE = 5
+  const BATCH_SIZE = 3 // Smaller batches due to more API calls per repo
   for (let i = 0; i < repos.length; i += BATCH_SIZE) {
     const batch = repos.slice(i, i + BATCH_SIZE)
     onProgress?.({
-      status: `Loading repo activities ${i + 1}-${Math.min(i + BATCH_SIZE, repos.length)} of ${repos.length}...`,
+      status: `Loading ${batch.map(r => r.name).join(', ')}...`,
       percentage: Math.round((i / repos.length) * 90) + 5
     })
     
     const results = await Promise.all(
-      batch.map(repo => fetchRepoActivities(token, org, repo.name))
+      batch.map(repo => fetchRepoActivitiesDetailed(token, org, repo.name))
     )
     
     for (const activities of results) {
       for (const activity of activities) {
         allActivities.push(activity)
         
-        // Track contributor stats
         const author = activity.author
         if (author && author !== 'unknown') {
           if (!contributorStats[author]) {
@@ -777,12 +875,37 @@ export async function fetchTeamRepoActivities(token, org, repos, onProgress) {
               prs: 0,
               reviews: 0,
               comments: 0,
+              merges: 0,
+              approvals: 0,
+              linesAdded: 0,
+              linesRemoved: 0,
               reposActive: new Set(),
             }
           }
-          if (activity.type === 'commit') contributorStats[author].commits++
-          else if (activity.type === 'pr') contributorStats[author].prs++
-          contributorStats[author].reposActive.add(activity.repo)
+          
+          const s = contributorStats[author]
+          if (activity.type === 'commit') {
+            s.commits++
+            if (activity.stats) {
+              s.linesAdded += activity.stats.additions || 0
+              s.linesRemoved += activity.stats.deletions || 0
+            }
+          }
+          else if (activity.type === 'pr') s.prs++
+          else if (activity.type === 'merge') s.merges++
+          else if (activity.type === 'review') {
+            s.reviews++
+            if (activity.subType === 'approved') s.approvals++
+          }
+          else if (activity.type === 'comment') s.comments++
+          
+          s.reposActive.add(activity.repo)
+          
+          // Track last active date
+          const activityDate = new Date(activity.date)
+          if (!contributorLastActive[author] || activityDate > contributorLastActive[author]) {
+            contributorLastActive[author] = activityDate
+          }
         }
       }
     }
@@ -792,22 +915,77 @@ export async function fetchTeamRepoActivities(token, org, repos, onProgress) {
   allActivities.sort((a, b) => new Date(b.date) - new Date(a.date))
   const seen = new Set()
   const unique = allActivities.filter(a => {
-    const key = `${a.type}-${a.repo}-${a.url}`
+    const key = `${a.type}-${a.id}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
   
+  // Calculate inactive status (6+ months)
+  const sixMonthsAgo = new Date()
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+  
   // Finalize stats
   const stats = Object.values(contributorStats).map(s => ({
     ...s,
     reposActive: s.reposActive.size,
-    total: s.commits + s.prs + s.reviews + s.comments
+    total: s.commits + s.prs + s.reviews + s.comments,
+    lastActive: contributorLastActive[s.login],
+    isInactive: contributorLastActive[s.login] ? contributorLastActive[s.login] < sixMonthsAgo : true,
   })).sort((a, b) => b.total - a.total)
   
   onProgress?.({ status: 'Complete!', percentage: 100 })
   
   return { activities: unique, contributorStats: stats }
+}
+
+// Fetch single repo activities (for repo selector)
+export async function fetchSingleRepoActivities(token, org, repoName, onProgress) {
+  onProgress?.({ status: `Loading ${repoName}...`, percentage: 20 })
+  const activities = await fetchRepoActivitiesDetailed(token, org, repoName)
+  
+  const contributorStats = {}
+  const contributorLastActive = {}
+  
+  for (const activity of activities) {
+    const author = activity.author
+    if (author && author !== 'unknown') {
+      if (!contributorStats[author]) {
+        contributorStats[author] = {
+          login: author,
+          avatarUrl: activity.avatarUrl,
+          commits: 0, prs: 0, reviews: 0, comments: 0, merges: 0, approvals: 0,
+          linesAdded: 0, linesRemoved: 0, reposActive: new Set(),
+        }
+      }
+      const s = contributorStats[author]
+      if (activity.type === 'commit') { s.commits++; if (activity.stats) { s.linesAdded += activity.stats.additions || 0; s.linesRemoved += activity.stats.deletions || 0 } }
+      else if (activity.type === 'pr') s.prs++
+      else if (activity.type === 'merge') s.merges++
+      else if (activity.type === 'review') { s.reviews++; if (activity.subType === 'approved') s.approvals++ }
+      else if (activity.type === 'comment') s.comments++
+      s.reposActive.add(activity.repo)
+      
+      const activityDate = new Date(activity.date)
+      if (!contributorLastActive[author] || activityDate > contributorLastActive[author]) {
+        contributorLastActive[author] = activityDate
+      }
+    }
+  }
+  
+  const sixMonthsAgo = new Date()
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+  
+  const stats = Object.values(contributorStats).map(s => ({
+    ...s, reposActive: s.reposActive.size, total: s.commits + s.prs + s.reviews + s.comments,
+    lastActive: contributorLastActive[s.login],
+    isInactive: contributorLastActive[s.login] ? contributorLastActive[s.login] < sixMonthsAgo : true,
+  })).sort((a, b) => b.total - a.total)
+  
+  activities.sort((a, b) => new Date(b.date) - new Date(a.date))
+  onProgress?.({ status: 'Complete!', percentage: 100 })
+  
+  return { activities, contributorStats: stats }
 }
 
 // ============ TEAM MEMBER ACTIVITIES (Activities by members ANYWHERE) ============
