@@ -427,6 +427,28 @@ export async function fetchAllOrgRepos(token, org) {
   return allRepos
 }
 
+// FAST version - limit to 2 pages max for team view
+async function fetchUserCommitsSearchFast(token, org, username) {
+  const query = `author:${username} org:${org}`
+  const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(query)}&sort=author-date&order=desc&per_page=100`
+  const results = []
+  let page = 1
+  while (page <= 2) { // Only 2 pages for speed
+    try {
+      const response = await fetch(`${url}&page=${page}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.cloak-preview+json', 'User-Agent': 'GitPulse-Dashboard' },
+      })
+      if (!response.ok) break
+      const data = await response.json()
+      results.push(...data.items)
+      if (data.items.length < 100) break
+      page++
+    } catch (e) { break }
+  }
+  return results
+}
+
+// Full version for individual user view
 async function fetchUserCommitsSearch(token, org, username) {
   const query = `author:${username} org:${org}`
   const url = `${GITHUB_API_BASE}/search/commits?q=${encodeURIComponent(query)}&sort=author-date&order=desc&per_page=100`
@@ -447,6 +469,28 @@ async function fetchUserCommitsSearch(token, org, username) {
   return results
 }
 
+// FAST version - limit to 2 pages max for team view
+async function fetchUserPRsSearchFast(token, org, username) {
+  const query = `author:${username} org:${org} is:pr`
+  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=created&order=desc&per_page=100`
+  const results = []
+  let page = 1
+  while (page <= 2) { // Only 2 pages for speed
+    try {
+      const response = await fetch(`${url}&page=${page}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
+      })
+      if (!response.ok) break
+      const data = await response.json()
+      results.push(...data.items)
+      if (data.items.length < 100) break
+      page++
+    } catch (e) { break }
+  }
+  return results
+}
+
+// Full version for individual user view
 async function fetchUserPRsSearch(token, org, username) {
   const query = `author:${username} org:${org} is:pr`
   const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=created&order=desc&per_page=100`
@@ -599,210 +643,193 @@ export async function fetchTeamMembers(token, org, teamSlug) {
   } catch (error) { throw error }
 }
 
-// Fetch PR reviews for a user
+// Fetch PR reviews for a user (FAST - single page)
 async function fetchUserPRReviews(token, org, username) {
   const query = `reviewed-by:${username} org:${org} is:pr`
-  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=100`
-  const results = []
-  let page = 1
-  while (page <= 5) {
-    try {
-      const response = await fetch(`${url}&page=${page}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
-      })
-      if (!response.ok) break
-      const data = await response.json()
-      results.push(...data.items)
-      if (data.items.length < 100 || results.length >= data.total_count) break
-      page++
-    } catch (e) { break }
-  }
-  return results
+  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=50`
+  try {
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
+    })
+    if (!response.ok) return []
+    const data = await response.json()
+    return data.items || []
+  } catch (e) { return [] }
 }
 
-// Fetch PR comments by user
+// Fetch PR comments by user (FAST - single page)
 async function fetchUserPRComments(token, org, username) {
   const query = `commenter:${username} org:${org} is:pr`
-  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=100`
-  const results = []
-  let page = 1
-  while (page <= 5) {
-    try {
-      const response = await fetch(`${url}&page=${page}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
-      })
-      if (!response.ok) break
-      const data = await response.json()
-      results.push(...data.items)
-      if (data.items.length < 100) break
-      page++
-    } catch (e) { break }
-  }
-  return results
+  const url = `${GITHUB_API_BASE}/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=50`
+  try {
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GitPulse-Dashboard' },
+    })
+    if (!response.ok) return []
+    const data = await response.json()
+    return data.items || []
+  } catch (e) { return [] }
 }
 
-// Fetch all team activities
-export async function fetchTeamActivities(token, org, members, onProgress) {
+// Fetch single member's activities (for parallel processing) - FAST VERSION
+async function fetchMemberActivities(token, org, member) {
   const activities = []
-  const memberStats = {}
-  const repoSet = new Set()
-  
-  let processed = 0
-  const total = members.length * 4 // commits, PRs, reviews, comments for each member
-  
-  for (const member of members) {
-    memberStats[member.login] = {
-      login: member.login,
-      avatarUrl: member.avatarUrl,
-      commits: 0,
-      prs: 0,
-      reviews: 0,
-      comments: 0,
-      linesChanged: 0,
-      reposActive: new Set(),
-    }
-    
-    try {
-      // Fetch commits
-      onProgress?.({ processed, total, status: `Loading commits for ${member.login}...` })
-      const commits = await fetchUserCommitsSearch(token, org, member.login)
-      processed++
-      
-      for (const commit of commits) {
-        const repoName = commit.repository.name
-        repoSet.add(repoName)
-        memberStats[member.login].commits++
-        memberStats[member.login].reposActive.add(repoName)
-        
-        activities.push({
-          id: `${member.login}-${commit.sha}`,
-          type: 'commit',
-          repo: repoName,
-          repoFullName: commit.repository.full_name,
-          message: commit.commit.message.split('\n')[0],
-          fullMessage: commit.commit.message,
-          date: commit.commit.author.date,
-          sha: commit.sha,
-          shortSha: commit.sha.substring(0, 7),
-          url: commit.html_url,
-          author: member.login,
-          avatarUrl: member.avatarUrl,
-        })
-      }
-      
-      // Fetch PRs
-      onProgress?.({ processed, total, status: `Loading PRs for ${member.login}...` })
-      const prs = await fetchUserPRsSearch(token, org, member.login)
-      processed++
-      
-      for (const pr of prs) {
-        const repoFullName = pr.repository_url.replace('https://api.github.com/repos/', '')
-        const repoName = repoFullName.split('/')[1]
-        repoSet.add(repoName)
-        memberStats[member.login].prs++
-        memberStats[member.login].reposActive.add(repoName)
-        
-        activities.push({
-          id: `${member.login}-pr-${pr.id}`,
-          type: 'pr',
-          repo: repoName,
-          repoFullName,
-          message: pr.title,
-          body: pr.body,
-          date: pr.created_at,
-          updatedAt: pr.updated_at,
-          number: pr.number,
-          url: pr.html_url,
-          state: pr.pull_request?.merged_at ? 'merged' : pr.state,
-          author: member.login,
-          avatarUrl: member.avatarUrl,
-          labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [],
-        })
-      }
-      
-      // Fetch PR reviews
-      onProgress?.({ processed, total, status: `Loading reviews for ${member.login}...` })
-      const reviews = await fetchUserPRReviews(token, org, member.login)
-      processed++
-      
-      for (const review of reviews) {
-        const repoFullName = review.repository_url.replace('https://api.github.com/repos/', '')
-        const repoName = repoFullName.split('/')[1]
-        
-        // Only count if not their own PR
-        if (review.user?.login !== member.login) {
-          memberStats[member.login].reviews++
-          
-          activities.push({
-            id: `${member.login}-review-${review.id}`,
-            type: 'review',
-            repo: repoName,
-            repoFullName,
-            message: `Reviewed PR #${review.number}: ${review.title}`,
-            prTitle: review.title,
-            date: review.updated_at,
-            number: review.number,
-            url: review.html_url,
-            prAuthor: review.user?.login,
-            author: member.login,
-            avatarUrl: member.avatarUrl,
-          })
-        }
-      }
-      
-      // Fetch PR comments
-      onProgress?.({ processed, total, status: `Loading comments for ${member.login}...` })
-      const comments = await fetchUserPRComments(token, org, member.login)
-      processed++
-      
-      for (const comment of comments) {
-        const repoFullName = comment.repository_url.replace('https://api.github.com/repos/', '')
-        const repoName = repoFullName.split('/')[1]
-        
-        memberStats[member.login].comments++
-        
-        activities.push({
-          id: `${member.login}-comment-${comment.id}-${comment.number}`,
-          type: 'comment',
-          repo: repoName,
-          repoFullName,
-          message: `Commented on PR #${comment.number}: ${comment.title}`,
-          prTitle: comment.title,
-          date: comment.updated_at,
-          number: comment.number,
-          url: comment.html_url,
-          author: member.login,
-          avatarUrl: member.avatarUrl,
-        })
-      }
-    } catch (e) {
-      console.warn(`Failed to fetch activities for ${member.login}:`, e)
-      processed += 4 - (processed % 4) // Skip remaining for this member
-    }
-    
-    onProgress?.({ processed, total, percentage: Math.round((processed / total) * 100) })
+  const stats = {
+    login: member.login,
+    avatarUrl: member.avatarUrl,
+    commits: 0,
+    prs: 0,
+    reviews: 0,
+    comments: 0,
+    reposActive: new Set(),
   }
   
-  // Convert reposActive Sets to counts
-  Object.values(memberStats).forEach(stats => {
-    stats.reposActive = stats.reposActive.size
-  })
+  // Fetch ALL data types in PARALLEL for this member (using FAST versions)
+  const [commits, prs, reviews, comments] = await Promise.all([
+    fetchUserCommitsSearchFast(token, org, member.login).catch(() => []),
+    fetchUserPRsSearchFast(token, org, member.login).catch(() => []),
+    fetchUserPRReviews(token, org, member.login).catch(() => []),
+    fetchUserPRComments(token, org, member.login).catch(() => []),
+  ])
   
-  // Sort activities by date
-  activities.sort((a, b) => new Date(b.date) - new Date(a.date))
+  // Process commits
+  for (const commit of commits) {
+    const repoName = commit.repository.name
+    stats.commits++
+    stats.reposActive.add(repoName)
+    activities.push({
+      id: `${member.login}-${commit.sha}`,
+      type: 'commit',
+      repo: repoName,
+      repoFullName: commit.repository.full_name,
+      message: commit.commit.message.split('\n')[0],
+      date: commit.commit.author.date,
+      sha: commit.sha,
+      shortSha: commit.sha.substring(0, 7),
+      url: commit.html_url,
+      author: member.login,
+      avatarUrl: member.avatarUrl,
+    })
+  }
   
-  // Remove duplicates (same event might appear in multiple searches)
+  // Process PRs
+  for (const pr of prs) {
+    const repoFullName = pr.repository_url.replace('https://api.github.com/repos/', '')
+    const repoName = repoFullName.split('/')[1]
+    stats.prs++
+    stats.reposActive.add(repoName)
+    activities.push({
+      id: `${member.login}-pr-${pr.id}`,
+      type: 'pr',
+      repo: repoName,
+      repoFullName,
+      message: pr.title,
+      date: pr.created_at,
+      number: pr.number,
+      url: pr.html_url,
+      state: pr.pull_request?.merged_at ? 'merged' : pr.state,
+      author: member.login,
+      avatarUrl: member.avatarUrl,
+      labels: pr.labels?.map(l => ({ name: l.name, color: l.color })) || [],
+    })
+  }
+  
+  // Process reviews
+  for (const review of reviews) {
+    if (review.user?.login !== member.login) {
+      const repoFullName = review.repository_url.replace('https://api.github.com/repos/', '')
+      const repoName = repoFullName.split('/')[1]
+      stats.reviews++
+      activities.push({
+        id: `${member.login}-review-${review.id}`,
+        type: 'review',
+        repo: repoName,
+        repoFullName,
+        message: `Reviewed PR #${review.number}: ${review.title}`,
+        date: review.updated_at,
+        number: review.number,
+        url: review.html_url,
+        author: member.login,
+        avatarUrl: member.avatarUrl,
+      })
+    }
+  }
+  
+  // Process comments
+  for (const comment of comments) {
+    const repoFullName = comment.repository_url.replace('https://api.github.com/repos/', '')
+    const repoName = repoFullName.split('/')[1]
+    stats.comments++
+    activities.push({
+      id: `${member.login}-comment-${comment.id}-${comment.number}`,
+      type: 'comment',
+      repo: repoName,
+      repoFullName,
+      message: `Commented on PR #${comment.number}: ${comment.title}`,
+      date: comment.updated_at,
+      number: comment.number,
+      url: comment.html_url,
+      author: member.login,
+      avatarUrl: member.avatarUrl,
+    })
+  }
+  
+  return { activities, stats }
+}
+
+// Fetch all team activities - PARALLEL VERSION (FAST!)
+export async function fetchTeamActivities(token, org, members, onProgress) {
+  onProgress?.({ status: `Loading activities for ${members.length} members in parallel...`, percentage: 10 })
+  
+  // Process members in parallel batches to avoid rate limits
+  const BATCH_SIZE = 5 // Process 5 members at a time
+  const allActivities = []
+  const allStats = []
+  const repoSet = new Set()
+  
+  for (let i = 0; i < members.length; i += BATCH_SIZE) {
+    const batch = members.slice(i, i + BATCH_SIZE)
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1
+    const totalBatches = Math.ceil(members.length / BATCH_SIZE)
+    
+    onProgress?.({ 
+      status: `Processing batch ${batchNum}/${totalBatches} (${batch.map(m => m.login).join(', ')})...`,
+      percentage: Math.round(((i + batch.length) / members.length) * 80) + 10
+    })
+    
+    // Fetch all members in this batch in PARALLEL
+    const results = await Promise.all(
+      batch.map(member => fetchMemberActivities(token, org, member))
+    )
+    
+    // Aggregate results
+    for (const result of results) {
+      allActivities.push(...result.activities)
+      result.stats.reposActive = result.stats.reposActive.size
+      allStats.push(result.stats)
+      result.activities.forEach(a => a.repo && repoSet.add(a.repo))
+    }
+  }
+  
+  onProgress?.({ status: 'Finalizing...', percentage: 95 })
+  
+  // Sort by date
+  allActivities.sort((a, b) => new Date(b.date) - new Date(a.date))
+  
+  // Remove duplicates
   const seen = new Set()
-  const uniqueActivities = activities.filter(a => {
+  const uniqueActivities = allActivities.filter(a => {
     const key = `${a.type}-${a.author}-${a.url}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
   
+  onProgress?.({ status: 'Complete!', percentage: 100 })
+  
   return {
     activities: uniqueActivities,
-    memberStats: Object.values(memberStats),
+    memberStats: allStats,
     repos: Array.from(repoSet).sort(),
   }
 }
