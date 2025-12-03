@@ -1,25 +1,27 @@
-// Vercel Serverless Function: Handle OAuth callback and exchange code for token
-export default async function handler(req, res) {
-  const { code, error: oauthError } = req.query
+export const config = {
+  runtime: 'edge',
+};
 
-  // Determine base URL for redirect
-  const protocol = req.headers['x-forwarded-proto'] || 'https'
-  const host = req.headers['x-forwarded-host'] || req.headers.host
-  const baseUrl = `${protocol}://${host}`
+export default async function handler(request) {
+  const url = new URL(request.url);
+  const baseUrl = `${url.protocol}//${url.host}`;
+  
+  const code = url.searchParams.get('code');
+  const oauthError = url.searchParams.get('error');
 
   if (oauthError) {
-    return res.redirect(`${baseUrl}/?error=${oauthError}`)
+    return Response.redirect(`${baseUrl}/?error=${oauthError}`, 302);
   }
 
   if (!code) {
-    return res.redirect(`${baseUrl}/?error=no_code`)
+    return Response.redirect(`${baseUrl}/?error=no_code`, 302);
   }
 
-  const clientId = process.env.GITHUB_CLIENT_ID
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    return res.redirect(`${baseUrl}/?error=missing_config`)
+    return Response.redirect(`${baseUrl}/?error=missing_env_config`, 302);
   }
 
   try {
@@ -35,16 +37,20 @@ export default async function handler(req, res) {
         client_secret: clientSecret,
         code: code,
       }),
-    })
+    });
 
-    const tokenData = await tokenResponse.json()
+    const tokenData = await tokenResponse.json();
 
     if (tokenData.error) {
-      console.error('OAuth error:', tokenData)
-      return res.redirect(`${baseUrl}/?error=${tokenData.error}`)
+      console.error('Token exchange error:', tokenData);
+      return Response.redirect(`${baseUrl}/?error=${tokenData.error}`, 302);
     }
 
-    const accessToken = tokenData.access_token
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      return Response.redirect(`${baseUrl}/?error=no_access_token`, 302);
+    }
 
     // Fetch user info
     const userResponse = await fetch('https://api.github.com/user', {
@@ -53,9 +59,13 @@ export default async function handler(req, res) {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'GitPulse-Dashboard',
       },
-    })
+    });
 
-    const user = await userResponse.json()
+    if (!userResponse.ok) {
+      return Response.redirect(`${baseUrl}/?error=user_fetch_failed`, 302);
+    }
+
+    const user = await userResponse.json();
 
     // Fetch user's organizations
     const orgsResponse = await fetch('https://api.github.com/user/orgs', {
@@ -64,11 +74,18 @@ export default async function handler(req, res) {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'GitPulse-Dashboard',
       },
-    })
+    });
 
-    const orgs = await orgsResponse.json()
+    let orgs = [];
+    if (orgsResponse.ok) {
+      const orgsData = await orgsResponse.json();
+      orgs = Array.isArray(orgsData) ? orgsData.map(o => ({
+        login: o.login,
+        avatar_url: o.avatar_url,
+      })) : [];
+    }
 
-    // Redirect back to app with token and user info in URL parameter
+    // Build auth data
     const authData = {
       token: accessToken,
       user: {
@@ -77,18 +94,16 @@ export default async function handler(req, res) {
         avatar_url: user.avatar_url,
         id: user.id,
       },
-      orgs: Array.isArray(orgs) ? orgs.map(o => ({
-        login: o.login,
-        avatar_url: o.avatar_url,
-      })) : [],
-    }
+      orgs: orgs,
+    };
 
-    // Encode and redirect
-    const encoded = Buffer.from(JSON.stringify(authData)).toString('base64')
-    res.redirect(`${baseUrl}/?auth=${encoded}`)
+    // Encode as base64
+    const encoded = btoa(JSON.stringify(authData));
+    
+    return Response.redirect(`${baseUrl}/?auth=${encoded}`, 302);
     
   } catch (error) {
-    console.error('OAuth callback error:', error)
-    res.redirect(`${baseUrl}/?error=callback_failed`)
+    console.error('OAuth callback error:', error);
+    return Response.redirect(`${baseUrl}/?error=callback_exception`, 302);
   }
 }
