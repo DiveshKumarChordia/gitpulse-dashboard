@@ -8,6 +8,7 @@ import { StatsBar } from './components/StatsBar'
 import { HeatMap } from './components/HeatMap'
 import { CodeSearch } from './components/CodeSearch'
 import { FileHistory } from './components/FileHistory'
+import { TeamsDashboard } from './components/TeamsDashboard'
 import { EmptyState } from './components/EmptyState'
 import { LoadingState } from './components/LoadingState'
 import { ToastProvider } from './components/Toast'
@@ -27,7 +28,7 @@ function AppContent() {
   const [allRepos, setAllRepos] = useState([])
   
   // Active tab
-  const [activeTab, setActiveTab] = useState('activity') // 'activity' | 'search' | 'history'
+  const [activeTab, setActiveTab] = useState('activity') // 'activity' | 'search' | 'history' | 'teams'
   
   // Filters
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
@@ -285,11 +286,16 @@ function AppContent() {
                   org={config?.org}
                   allRepos={allRepos}
                 />
-              ) : (
+              ) : activeTab === 'history' ? (
                 <FileHistory 
                   token={config?.token}
                   org={config?.org}
                   allRepos={allRepos}
+                />
+              ) : (
+                <TeamsDashboard 
+                  token={config?.token}
+                  org={config?.org}
                 />
               )}
             </div>

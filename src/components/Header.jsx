@@ -1,4 +1,4 @@
-import { Menu, Settings, LogOut, Github, Zap, Activity, Code2, History } from 'lucide-react'
+import { Menu, Settings, LogOut, Github, Zap, Activity, Code2, History, Users } from 'lucide-react'
 
 export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSidebar, activeTab, onTabChange }) {
   return (
@@ -64,6 +64,17 @@ export function Header({ config, onLogout, onOpenSetup, sidebarOpen, onToggleSid
             >
               <History className="w-4 h-4" />
               File History
+            </button>
+            <button
+              onClick={() => onTabChange('teams')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'teams'
+                  ? 'bg-gradient-to-r from-electric-400 to-purple-500 text-white'
+                  : 'text-frost-300/60 hover:text-frost-200 hover:bg-void-600/50'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              Teams
             </button>
           </div>
         )}
