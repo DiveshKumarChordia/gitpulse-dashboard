@@ -12,18 +12,22 @@ function getFileIcon(name) {
   return FILE_ICONS[ext] || null
 }
 
-function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, onToggleFolder }) {
+function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, onToggleFolder, singleSelect }) {
   const isFolder = node.type === 'tree'
   const isExpanded = expandedFolders.has(node.path)
   const isSelected = selectedPaths.has(node.path)
-  const hasSelectedChildren = isFolder && node.children?.some(child => 
+  const hasSelectedChildren = !singleSelect && isFolder && node.children?.some(child => 
     selectedPaths.has(child.path) || 
     (child.type === 'tree' && child.children?.some(c => selectedPaths.has(c.path)))
   )
 
   const handleClick = (e) => {
     e.stopPropagation()
-    if (isFolder) onToggleFolder(node.path)
+    if (isFolder) {
+      onToggleFolder(node.path)
+    } else if (singleSelect) {
+      onSelect(node.path, isFolder, node)
+    }
   }
 
   const handleSelect = (e) => {
@@ -48,14 +52,16 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
           </button>
         ) : <span className="w-4" />}
 
-        <button
-          onClick={handleSelect}
-          className={`flex-shrink-0 w-3.5 h-3.5 rounded border transition-all ${
-            isSelected ? 'bg-electric-400 border-electric-400' : hasSelectedChildren ? 'bg-electric-400/30 border-electric-400/50' : 'border-frost-300/30 hover:border-electric-400/50'
-          }`}
-        >
-          {(isSelected || hasSelectedChildren) && <Check className="w-2.5 h-2.5 text-void-900 mx-auto" />}
-        </button>
+        {!singleSelect && (
+          <button
+            onClick={handleSelect}
+            className={`flex-shrink-0 w-3.5 h-3.5 rounded border transition-all ${
+              isSelected ? 'bg-electric-400 border-electric-400' : hasSelectedChildren ? 'bg-electric-400/30 border-electric-400/50' : 'border-frost-300/30 hover:border-electric-400/50'
+            }`}
+          >
+            {(isSelected || hasSelectedChildren) && <Check className="w-2.5 h-2.5 text-void-900 mx-auto" />}
+          </button>
+        )}
 
         {isFolder ? (
           isExpanded ? <FolderOpen className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" /> : <Folder className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
@@ -65,9 +71,13 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
           <FileCode className="w-3.5 h-3.5 text-frost-300/60 flex-shrink-0" />
         )}
 
-        <span className={`text-xs truncate ${isFolder ? 'font-medium text-frost-100' : 'text-frost-200'}`}>
+        <span className={`text-xs truncate ${isFolder ? 'font-medium text-frost-100' : isSelected ? 'text-electric-400 font-medium' : 'text-frost-200'}`}>
           {node.name}
         </span>
+        
+        {singleSelect && isSelected && !isFolder && (
+          <Check className="w-3 h-3 text-electric-400 ml-auto flex-shrink-0" />
+        )}
       </div>
 
       {isFolder && isExpanded && node.children && (
@@ -81,6 +91,7 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
               onSelect={onSelect}
               expandedFolders={expandedFolders}
               onToggleFolder={onToggleFolder}
+              singleSelect={singleSelect}
             />
           ))}
         </div>
@@ -89,7 +100,7 @@ function TreeNode({ node, depth = 0, selectedPaths, onSelect, expandedFolders, o
   )
 }
 
-export function FileTree({ tree, selectedPaths, onSelect }) {
+export function FileTree({ tree, selectedPaths, onSelect, singleSelect = false }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set())
 
   const handleToggleFolder = (path) => {
@@ -121,7 +132,7 @@ export function FileTree({ tree, selectedPaths, onSelect }) {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-1 mb-2">
         <span className="text-xs text-frost-300/60">
-          {selectedPaths.size > 0 ? `${selectedPaths.size} selected` : 'Optional'}
+          {singleSelect ? 'Click to select file' : selectedPaths.size > 0 ? `${selectedPaths.size} selected` : 'Optional'}
         </span>
         <div className="flex gap-2">
           <button onClick={handleExpandAll} className="text-xs text-electric-400 hover:text-electric-500 transition-colors">Expand</button>
@@ -141,6 +152,7 @@ export function FileTree({ tree, selectedPaths, onSelect }) {
               onSelect={onSelect}
               expandedFolders={expandedFolders}
               onToggleFolder={handleToggleFolder}
+              singleSelect={singleSelect}
             />
           ))
         )}

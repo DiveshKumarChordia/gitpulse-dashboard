@@ -7,6 +7,7 @@ import { SetupModal } from './components/SetupModal'
 import { StatsBar } from './components/StatsBar'
 import { HeatMap } from './components/HeatMap'
 import { CodeSearch } from './components/CodeSearch'
+import { FileHistory } from './components/FileHistory'
 import { EmptyState } from './components/EmptyState'
 import { LoadingState } from './components/LoadingState'
 import { ToastProvider } from './components/Toast'
@@ -26,7 +27,7 @@ function AppContent() {
   const [allRepos, setAllRepos] = useState([])
   
   // Active tab
-  const [activeTab, setActiveTab] = useState('activity') // 'activity' | 'search'
+  const [activeTab, setActiveTab] = useState('activity') // 'activity' | 'search' | 'history'
   
   // Filters
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
@@ -278,8 +279,14 @@ function AppContent() {
                     <Timeline activities={filteredActivities} />
                   )}
                 </>
-              ) : (
+              ) : activeTab === 'search' ? (
                 <CodeSearch 
+                  token={config?.token}
+                  org={config?.org}
+                  allRepos={allRepos}
+                />
+              ) : (
+                <FileHistory 
                   token={config?.token}
                   org={config?.org}
                   allRepos={allRepos}

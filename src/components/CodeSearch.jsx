@@ -3,7 +3,7 @@ import {
   Search, FileCode, Folder, ExternalLink, Code2, Loader2, AlertCircle, 
   ChevronDown, ChevronUp, GitBranch, Check, FolderTree, ArrowRight,
   RotateCcw, Sparkles, GitCommit, Link, ChevronLeft, ChevronRight as ChevronRightIcon,
-  AlertTriangle, GitPullRequest, GitMerge, MessageSquare, Calendar, User
+  AlertTriangle, GitPullRequest, GitMerge, MessageSquare, Calendar, User, Maximize2, Minimize2
 } from 'lucide-react'
 import { searchCode, getFileContent, fetchBranches, fetchRepoTree, unifiedSearch, searchCommits, searchPRs } from '../api/github'
 import { FileTree } from './FileTree'
@@ -19,6 +19,11 @@ const ITEMS_PER_PAGE = 3
 // ============ RESULT CARDS ============
 
 function CommitResult({ commit, org }) {
+  const repoName = commit.repository?.name || 'unknown'
+  const repoFullName = commit.repository?.fullName || `${org}/${repoName}`
+  const commitUrl = commit.url || `https://github.com/${repoFullName}/commit/${commit.sha}`
+  const repoUrl = `https://github.com/${repoFullName}`
+  
   return (
     <div className="bg-void-700/30 border border-void-600/50 rounded-xl overflow-hidden hover:border-neon-green/30 transition-all group">
       <div className="p-4">
@@ -29,8 +34,12 @@ function CommitResult({ commit, org }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-xs px-2 py-0.5 bg-neon-green/20 text-neon-green rounded font-medium">Commit</span>
-              <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{commit.repository.name}</span>
-              <span className="text-xs font-mono text-frost-300/50">{commit.shortSha}</span>
+              <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded hover:bg-yellow-400/30 transition-colors">
+                {repoName}
+              </a>
+              <a href={commitUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-frost-300/50 hover:text-electric-400 transition-colors">
+                {commit.shortSha}
+              </a>
             </div>
             <h3 className="text-frost-100 font-medium line-clamp-2">{commit.message}</h3>
             <div className="flex items-center gap-4 mt-2 text-xs text-frost-300/60">
@@ -41,9 +50,20 @@ function CommitResult({ commit, org }) {
                 <Calendar className="w-3 h-3" /> {new Date(commit.date).toLocaleDateString()}
               </span>
             </div>
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-void-600/30">
+              <a href={commitUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-neon-green hover:text-neon-green/80 transition-colors">
+                <GitCommit className="w-3 h-3" />View commit
+              </a>
+              <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors">
+                <Folder className="w-3 h-3" />View repo
+              </a>
+              <a href={`${repoUrl}/commits`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors">
+                <GitBranch className="w-3 h-3" />All commits
+              </a>
+            </div>
           </div>
           <a 
-            href={commit.url} 
+            href={commitUrl} 
             target="_blank" 
             rel="noopener noreferrer" 
             className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0"
@@ -57,6 +77,11 @@ function CommitResult({ commit, org }) {
 }
 
 function PRResult({ pr, org }) {
+  const repoName = pr.repository?.name || 'unknown'
+  const repoFullName = pr.repository?.fullName || `${org}/${repoName}`
+  const prUrl = pr.url || `https://github.com/${repoFullName}/pull/${pr.number}`
+  const repoUrl = `https://github.com/${repoFullName}`
+  
   const stateColors = {
     open: 'bg-green-500/20 text-green-400',
     closed: 'bg-red-500/20 text-red-400',
@@ -77,11 +102,15 @@ function PRResult({ pr, org }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded font-medium">PR</span>
-              <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{pr.repository.name}</span>
+              <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded hover:bg-yellow-400/30 transition-colors">
+                {repoName}
+              </a>
               <span className={`text-xs px-2 py-0.5 rounded capitalize ${stateColors[pr.state] || stateColors.open}`}>
                 {pr.state}
               </span>
-              <span className="text-xs text-frost-300/50">#{pr.number}</span>
+              <a href={prUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-frost-300/50 hover:text-electric-400 transition-colors">
+                #{pr.number}
+              </a>
             </div>
             <h3 className="text-frost-100 font-medium line-clamp-2">{pr.title}</h3>
             {pr.body && (
@@ -111,9 +140,20 @@ function PRResult({ pr, org }) {
                 ))}
               </div>
             )}
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-void-600/30">
+              <a href={prUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-colors">
+                <GitPullRequest className="w-3 h-3" />View PR
+              </a>
+              <a href={`${prUrl}/commits`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors">
+                <GitCommit className="w-3 h-3" />PR commits
+              </a>
+              <a href={`${prUrl}/files`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors">
+                <FileCode className="w-3 h-3" />Files changed
+              </a>
+            </div>
           </div>
           <a 
-            href={pr.url} 
+            href={prUrl} 
             target="_blank" 
             rel="noopener noreferrer" 
             className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0"
@@ -134,8 +174,10 @@ function CodePreview({ result, token, org, selectedBranches }) {
 
   const branch = selectedBranches?.length > 0 ? selectedBranches[0] : 'main'
   const repoName = result.repository?.name || 'unknown'
-  const branchUrl = `https://github.com/${org}/${repoName}/tree/${branch}`
-  const fileUrlWithBranch = `https://github.com/${org}/${repoName}/blob/${branch}/${result.path}`
+  const repoFullName = result.repository?.fullName || `${org}/${repoName}`
+  const branchUrl = `https://github.com/${repoFullName}/tree/${branch}`
+  const fileUrlWithBranch = `https://github.com/${repoFullName}/blob/${branch}/${result.path}`
+  const repoUrl = `https://github.com/${repoFullName}`
 
   const loadContent = async () => {
     if (content) {
@@ -166,10 +208,12 @@ function CodePreview({ result, token, org, selectedBranches }) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap mb-1">
                 <span className="text-xs px-2 py-0.5 bg-electric-400/20 text-electric-400 rounded font-medium">Code</span>
-                <span className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{repoName}</span>
-                <span className="text-xs px-2 py-0.5 bg-frost-300/10 text-frost-300/60 rounded flex items-center gap-1">
+                <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded hover:bg-yellow-400/30 transition-colors">
+                  {repoName}
+                </a>
+                <a href={branchUrl} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 bg-frost-300/10 text-frost-300/60 rounded flex items-center gap-1 hover:bg-frost-300/20 transition-colors">
                   <GitBranch className="w-3 h-3" />{branch}
-                </span>
+                </a>
               </div>
               <h3 className="text-frost-100 font-medium truncate">{result.name}</h3>
               <p className="text-xs text-frost-300/60 font-mono truncate mt-0.5">{result.path}</p>
@@ -186,7 +230,7 @@ function CodePreview({ result, token, org, selectedBranches }) {
         <div className="flex items-center gap-3 mt-3 pt-3 border-t border-void-600/30">
           <a href={fileUrlWithBranch} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-electric-400 hover:text-electric-500 transition-colors"><Link className="w-3 h-3" />View in {branch}</a>
           <a href={branchUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors"><GitBranch className="w-3 h-3" />Browse branch</a>
-          <a href={`https://github.com/${org}/${repoName}/commits/${branch}/${result.path}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors"><GitCommit className="w-3 h-3" />View commits</a>
+          <a href={`https://github.com/${repoFullName}/commits/${branch}/${result.path}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-frost-300/60 hover:text-frost-200 transition-colors"><GitCommit className="w-3 h-3" />File history</a>
         </div>
         {result.textMatches && result.textMatches.length > 0 && (
           <div className="mt-3 space-y-2">
@@ -242,45 +286,96 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
     <div className="flex items-center justify-center gap-2 mt-4">
       <button onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 0} className="p-2 rounded-lg bg-void-700/50 hover:bg-void-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"><ChevronLeft className="w-4 h-4 text-frost-200" /></button>
       <div className="flex items-center gap-1">
-        {Array.from({ length: totalPages }, (_, i) => (
-          <button key={i} onClick={() => onPageChange(i)} className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${currentPage === i ? 'bg-electric-400 text-void-900' : 'bg-void-700/50 text-frost-300/60 hover:bg-void-700 hover:text-frost-200'}`}>{i + 1}</button>
-        ))}
+        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+          const pageNum = totalPages <= 5 ? i : Math.min(Math.max(currentPage - 2, 0), totalPages - 5) + i
+          return (
+            <button key={pageNum} onClick={() => onPageChange(pageNum)} className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${currentPage === pageNum ? 'bg-electric-400 text-void-900' : 'bg-void-700/50 text-frost-300/60 hover:bg-void-700 hover:text-frost-200'}`}>{pageNum + 1}</button>
+          )
+        })}
       </div>
       <button onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages - 1} className="p-2 rounded-lg bg-void-700/50 hover:bg-void-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"><ChevronRightIcon className="w-4 h-4 text-frost-200" /></button>
     </div>
   )
 }
 
-function RepoBranchCard({ repo, branches, selectedBranches, onToggleBranch, onSelectAll, branchSearch }) {
-  const filteredBranches = branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
-  const allSelected = filteredBranches.length > 0 && filteredBranches.every(b => selectedBranches.has(b.name))
+// Resizable card component
+function ResizableCard({ children, title, count, total, expanded, onToggleExpand, className = '' }) {
   return (
-    <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2"><Folder className="w-5 h-5 text-yellow-400" /><span className="font-medium text-frost-100 truncate">{repo.name}</span></div>
-        <span className="text-xs text-frost-300/60 px-2 py-0.5 bg-void-600/50 rounded">{selectedBranches.size}/{branches.length}</span>
-      </div>
-      <button onClick={onSelectAll} className="text-xs text-electric-400 hover:text-electric-500 transition-colors mb-3 text-left">{allSelected ? 'Clear all' : 'Select all'}</button>
-      <div className="flex-1 overflow-y-auto max-h-48 space-y-1.5">
-        {filteredBranches.length === 0 ? <p className="text-xs text-frost-300/40 italic">No branches match</p> : filteredBranches.map(branch => (
-          <button key={branch.name} onClick={() => onToggleBranch(branch.name)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all text-left ${selectedBranches.has(branch.name) ? 'bg-electric-400/20 text-electric-400 border border-electric-400/30' : 'bg-void-600/30 text-frost-300/60 border border-transparent hover:border-frost-300/20'}`}>
-            <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center ${selectedBranches.has(branch.name) ? 'bg-electric-400 border-electric-400' : 'border-current'}`}>{selectedBranches.has(branch.name) && <Check className="w-3 h-3 text-void-900" />}</div>
-            <GitBranch className="w-3 h-3 flex-shrink-0" /><span className="truncate">{branch.name}</span>
+    <div className={`bg-void-700/30 border border-void-600/50 rounded-xl flex flex-col transition-all ${expanded ? 'col-span-full' : ''} ${className}`}>
+      <div className="flex items-center justify-between p-4 border-b border-void-600/30">
+        <div className="flex items-center gap-2">
+          <Folder className="w-5 h-5 text-yellow-400" />
+          <span className="font-medium text-frost-100 truncate">{title}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-frost-300/60 px-2 py-0.5 bg-void-600/50 rounded">{count}/{total}</span>
+          <button onClick={onToggleExpand} className="p-1 hover:bg-void-600/50 rounded transition-colors" title={expanded ? 'Minimize' : 'Expand'}>
+            {expanded ? <Minimize2 className="w-4 h-4 text-frost-300/60" /> : <Maximize2 className="w-4 h-4 text-frost-300/60" />}
           </button>
-        ))}
+        </div>
+      </div>
+      <div className={`flex-1 overflow-hidden ${expanded ? 'max-h-[500px]' : 'max-h-64'}`}>
+        {children}
       </div>
     </div>
   )
 }
 
-function RepoFileTreeCard({ repo, tree, selectedPaths, onTogglePath, loading }) {
+function RepoBranchCard({ repo, branches, selectedBranches, onToggleBranch, onSelectAll, branchSearch, expanded, onToggleExpand, isSingle }) {
+  const filteredBranches = branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
+  const allSelected = filteredBranches.length > 0 && filteredBranches.every(b => selectedBranches.has(b.name))
+  
   return (
-    <div className="bg-void-700/30 border border-void-600/50 rounded-xl p-4 h-full flex flex-col">
-      <div className="flex items-center gap-2 mb-3">
-        <Folder className="w-5 h-5 text-yellow-400" /><span className="font-medium text-frost-100 truncate">{repo.name}</span>
-        <span className="text-xs text-frost-300/60 px-2 py-0.5 bg-void-600/50 rounded ml-auto">{selectedPaths.size} selected</span>
+    <div className={`bg-void-700/30 border border-void-600/50 rounded-xl flex flex-col transition-all ${expanded ? 'col-span-full' : ''} ${isSingle ? 'col-span-full max-w-2xl mx-auto' : ''}`}>
+      <div className="flex items-center justify-between p-4 border-b border-void-600/30">
+        <div className="flex items-center gap-2">
+          <Folder className="w-5 h-5 text-yellow-400" />
+          <span className="font-medium text-frost-100 truncate">{repo.name}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-frost-300/60 px-2 py-0.5 bg-void-600/50 rounded">{selectedBranches.size}/{branches.length}</span>
+          <button onClick={onToggleExpand} className="p-1 hover:bg-void-600/50 rounded transition-colors" title={expanded ? 'Minimize' : 'Expand'}>
+            {expanded ? <Minimize2 className="w-4 h-4 text-frost-300/60" /> : <Maximize2 className="w-4 h-4 text-frost-300/60" />}
+          </button>
+        </div>
       </div>
-      {loading ? <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 text-electric-400 animate-spin" /></div> : <div className="flex-1 overflow-hidden"><FileTree tree={tree} selectedPaths={selectedPaths} onSelect={onTogglePath} /></div>}
+      <div className="p-4 flex-1 flex flex-col">
+        <button onClick={onSelectAll} className="text-xs text-electric-400 hover:text-electric-500 transition-colors mb-3 text-left">{allSelected ? 'Clear all' : 'Select all'}</button>
+        <div className={`flex-1 overflow-y-auto space-y-1.5 ${expanded ? 'max-h-96' : isSingle ? 'max-h-64' : 'max-h-48'}`}>
+          {filteredBranches.length === 0 ? <p className="text-xs text-frost-300/40 italic">No branches match</p> : filteredBranches.map(branch => (
+            <button key={branch.name} onClick={() => onToggleBranch(branch.name)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all text-left ${selectedBranches.has(branch.name) ? 'bg-electric-400/20 text-electric-400 border border-electric-400/30' : 'bg-void-600/30 text-frost-300/60 border border-transparent hover:border-frost-300/20'}`}>
+              <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center ${selectedBranches.has(branch.name) ? 'bg-electric-400 border-electric-400' : 'border-current'}`}>{selectedBranches.has(branch.name) && <Check className="w-3 h-3 text-void-900" />}</div>
+              <GitBranch className="w-3 h-3 flex-shrink-0" /><span className="truncate">{branch.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RepoFileTreeCard({ repo, tree, selectedPaths, onTogglePath, loading, expanded, onToggleExpand, isSingle }) {
+  return (
+    <div className={`bg-void-700/30 border border-void-600/50 rounded-xl flex flex-col transition-all ${expanded ? 'col-span-full' : ''} ${isSingle ? 'col-span-full max-w-2xl mx-auto' : ''}`}>
+      <div className="flex items-center justify-between p-4 border-b border-void-600/30">
+        <div className="flex items-center gap-2">
+          <Folder className="w-5 h-5 text-yellow-400" />
+          <span className="font-medium text-frost-100 truncate">{repo.name}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-frost-300/60 px-2 py-0.5 bg-void-600/50 rounded">{selectedPaths.size} selected</span>
+          <button onClick={onToggleExpand} className="p-1 hover:bg-void-600/50 rounded transition-colors" title={expanded ? 'Minimize' : 'Expand'}>
+            {expanded ? <Minimize2 className="w-4 h-4 text-frost-300/60" /> : <Maximize2 className="w-4 h-4 text-frost-300/60" />}
+          </button>
+        </div>
+      </div>
+      <div className={`flex-1 overflow-hidden p-4 ${expanded ? 'max-h-[500px]' : isSingle ? 'max-h-80' : 'max-h-64'}`}>
+        {loading ? (
+          <div className="flex items-center justify-center h-full"><Loader2 className="w-6 h-6 text-electric-400 animate-spin" /></div>
+        ) : (
+          <div className="h-full overflow-auto"><FileTree tree={tree} selectedPaths={selectedPaths} onSelect={onTogglePath} /></div>
+        )}
+      </div>
     </div>
   )
 }
@@ -425,10 +520,12 @@ export function CodeSearch({ token, org, allRepos }) {
   const [branchSearch, setBranchSearch] = useState('')
   const [loadingBranches, setLoadingBranches] = useState(false)
   const [branchPage, setBranchPage] = useState(0)
+  const [expandedBranchCards, setExpandedBranchCards] = useState({})
   const [treesMap, setTreesMap] = useState({})
   const [selectedPathsMap, setSelectedPathsMap] = useState({})
   const [loadingTrees, setLoadingTrees] = useState({})
   const [filePage, setFilePage] = useState(0)
+  const [expandedFileCards, setExpandedFileCards] = useState({})
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -464,6 +561,7 @@ export function CodeSearch({ token, org, allRepos }) {
     setStep(2)
     setLoadingBranches(true)
     setBranchPage(0)
+    setExpandedBranchCards({})
     
     const newBranchesMap = {}
     const newSelectedBranchesMap = {}
@@ -511,6 +609,7 @@ export function CodeSearch({ token, org, allRepos }) {
     }
     setStep(3)
     setFilePage(0)
+    setExpandedFileCards({})
     
     const newSelectedPathsMap = {}
     selectedRepos.forEach(repo => { newSelectedPathsMap[repo.name] = new Set() })
@@ -636,6 +735,8 @@ export function CodeSearch({ token, org, allRepos }) {
     setBranchPage(0)
     setFilePage(0)
     setActiveResultsTab('all')
+    setExpandedBranchCards({})
+    setExpandedFileCards({})
   }
 
   const handleQuickSearchResults = (results) => {
@@ -644,10 +745,13 @@ export function CodeSearch({ token, org, allRepos }) {
     setActiveResultsTab('all')
   }
 
-  const branchTotalPages = Math.ceil(selectedRepos.length / ITEMS_PER_PAGE)
-  const branchPageRepos = selectedRepos.slice(branchPage * ITEMS_PER_PAGE, (branchPage + 1) * ITEMS_PER_PAGE)
-  const fileTotalPages = Math.ceil(selectedRepos.length / ITEMS_PER_PAGE)
-  const filePageRepos = selectedRepos.slice(filePage * ITEMS_PER_PAGE, (filePage + 1) * ITEMS_PER_PAGE)
+  // Calculate items per page based on selection count
+  const itemsPerPage = selectedRepos.length === 1 ? 1 : selectedRepos.length === 2 ? 2 : ITEMS_PER_PAGE
+  
+  const branchTotalPages = Math.ceil(selectedRepos.length / itemsPerPage)
+  const branchPageRepos = selectedRepos.slice(branchPage * itemsPerPage, (branchPage + 1) * itemsPerPage)
+  const fileTotalPages = Math.ceil(selectedRepos.length / itemsPerPage)
+  const filePageRepos = selectedRepos.slice(filePage * itemsPerPage, (filePage + 1) * itemsPerPage)
 
   // Get filtered results based on active tab
   const getFilteredResults = () => {
@@ -667,6 +771,13 @@ export function CodeSearch({ token, org, allRepos }) {
           ...results.code.items.map(item => ({ ...item, resultType: 'code' })),
         ]
     }
+  }
+
+  // Get grid class based on count
+  const getGridClass = (count) => {
+    if (count === 1) return 'grid-cols-1 max-w-2xl mx-auto'
+    if (count === 2) return 'grid-cols-1 md:grid-cols-2'
+    return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
   }
 
   return (
@@ -716,11 +827,26 @@ export function CodeSearch({ token, org, allRepos }) {
 
         {step === 2 && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between"><span className="text-sm text-frost-300/60">{totalSelectedBranches} branches selected</span><button onClick={() => setStep(1)} className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors">Change repos</button></div>
+            <div className="flex items-center justify-between"><span className="text-sm text-frost-300/60">{totalSelectedBranches} branches selected across {selectedRepos.length} repo{selectedRepos.length !== 1 ? 's' : ''}</span><button onClick={() => setStep(1)} className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors">Change repos</button></div>
             <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-frost-300/40" /><input type="text" value={branchSearch} onChange={(e) => setBranchSearch(e.target.value)} placeholder="Search branches..." className="w-full pl-10 pr-4 py-2.5 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 focus:outline-none focus:border-electric-400/50 transition-all" /></div>
             {loadingBranches ? <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 text-electric-400 animate-spin" /></div> : (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{branchPageRepos.map(repo => <RepoBranchCard key={repo.name} repo={repo} branches={branchesMap[repo.name] || []} selectedBranches={selectedBranchesMap[repo.name] || new Set()} onToggleBranch={(bn) => handleToggleBranch(repo.name, bn)} onSelectAll={() => handleSelectAllBranchesForRepo(repo.name)} branchSearch={branchSearch} />)}</div>
+                <div className={`grid gap-4 ${getGridClass(branchPageRepos.length)}`}>
+                  {branchPageRepos.map(repo => (
+                    <RepoBranchCard 
+                      key={repo.name} 
+                      repo={repo} 
+                      branches={branchesMap[repo.name] || []} 
+                      selectedBranches={selectedBranchesMap[repo.name] || new Set()} 
+                      onToggleBranch={(bn) => handleToggleBranch(repo.name, bn)} 
+                      onSelectAll={() => handleSelectAllBranchesForRepo(repo.name)} 
+                      branchSearch={branchSearch}
+                      expanded={expandedBranchCards[repo.name]}
+                      onToggleExpand={() => setExpandedBranchCards(prev => ({ ...prev, [repo.name]: !prev[repo.name] }))}
+                      isSingle={selectedRepos.length === 1}
+                    />
+                  ))}
+                </div>
                 <Pagination currentPage={branchPage} totalPages={branchTotalPages} onPageChange={setBranchPage} />
                 <button onClick={handleConfirmBranches} disabled={totalSelectedBranches === 0} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-electric-400 to-electric-500 hover:from-electric-500 hover:to-electric-600 rounded-xl text-void-900 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">Continue<ArrowRight className="w-4 h-4" /></button>
               </>
@@ -730,8 +856,22 @@ export function CodeSearch({ token, org, allRepos }) {
 
         {step === 3 && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between"><span className="text-sm text-frost-300/60">Select files/folders (optional)</span><button onClick={() => setStep(2)} className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors">Change branches</button></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ minHeight: '320px' }}>{filePageRepos.map(repo => <RepoFileTreeCard key={repo.name} repo={repo} tree={treesMap[repo.name] || []} selectedPaths={selectedPathsMap[repo.name] || new Set()} onTogglePath={handleTogglePath(repo.name)} loading={loadingTrees[repo.name]} />)}</div>
+            <div className="flex items-center justify-between"><span className="text-sm text-frost-300/60">Select files/folders (optional) - {selectedRepos.length} repo{selectedRepos.length !== 1 ? 's' : ''}</span><button onClick={() => setStep(2)} className="text-sm text-frost-300/60 hover:text-frost-200 transition-colors">Change branches</button></div>
+            <div className={`grid gap-4 ${getGridClass(filePageRepos.length)}`} style={{ minHeight: selectedRepos.length === 1 ? '400px' : '320px' }}>
+              {filePageRepos.map(repo => (
+                <RepoFileTreeCard 
+                  key={repo.name} 
+                  repo={repo} 
+                  tree={treesMap[repo.name] || []} 
+                  selectedPaths={selectedPathsMap[repo.name] || new Set()} 
+                  onTogglePath={handleTogglePath(repo.name)} 
+                  loading={loadingTrees[repo.name]}
+                  expanded={expandedFileCards[repo.name]}
+                  onToggleExpand={() => setExpandedFileCards(prev => ({ ...prev, [repo.name]: !prev[repo.name] }))}
+                  isSingle={selectedRepos.length === 1}
+                />
+              ))}
+            </div>
             <Pagination currentPage={filePage} totalPages={fileTotalPages} onPageChange={setFilePage} />
             <div className="flex gap-3">
               <button onClick={() => { const c = {}; selectedRepos.forEach(r => c[r.name] = new Set()); setSelectedPathsMap(c) }} className="flex-1 px-4 py-3 bg-void-700/50 hover:bg-void-700 border border-void-600/50 rounded-xl text-frost-300 font-medium transition-all">Clear All</button>
