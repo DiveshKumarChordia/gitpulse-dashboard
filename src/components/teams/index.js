@@ -4,6 +4,7 @@
  */
 
 export { ActivityCard } from './ActivityCard'
+export { ActivityFeed } from './ActivityFeed'
 export { Leaderboard, LEADERBOARD_METRICS, TIME_FILTERS } from './Leaderboard'
 export { Heatmap } from './Heatmap'
 export { MemberProfile } from './MemberProfile'

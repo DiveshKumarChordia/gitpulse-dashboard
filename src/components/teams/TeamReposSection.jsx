@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Loader2, Activity, Clock, Folder, X, ChevronDown, Search } from 'lucide-react'
 import { isSameDay } from 'date-fns'
 import { fetchTeamRepoActivitiesLast24Hours, calculateStatsFromActivities, ACTIVITY_TYPES } from '../../api/github/activities'
-import { ActivityCard } from './ActivityCard'
+import { ActivityFeed } from './ActivityFeed'
 import { Leaderboard } from './Leaderboard'
 import { Heatmap } from './Heatmap'
 import { StatsCards } from './StatsCards'
@@ -283,33 +283,14 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
       {/* Main Content */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Activity Feed */}
-        <div className="xl:col-span-2 space-y-4">
-          <h3 className="text-frost-100 font-bold text-lg flex items-center gap-2">
-            <Activity className="w-5 h-5 text-yellow-400" />
-            Activity Feed
-            <span className="text-sm px-3 py-1 bg-void-600/50 rounded-full text-frost-300/60 font-normal">
-              {filteredActivities.length} activities
-            </span>
-          </h3>
-          
-          <div className="space-y-3 max-h-[800px] overflow-y-auto pr-2">
-            {filteredActivities.slice(0, 150).map((a, i) => (
-              <ActivityCard 
-                key={a.id} 
-                activity={a} 
-                onMemberClick={onMemberClick} 
-                animate={i < 5} 
-              />
-            ))}
-            
-            {filteredActivities.length === 0 && (
-              <div className="text-center py-16 text-frost-300/50">
-                <Activity className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                <p className="text-lg">No activities in the last 24 hours</p>
-                <p className="text-sm mt-1">Check back later for new updates</p>
-              </div>
-            )}
-          </div>
+        <div className="xl:col-span-2">
+          <ActivityFeed 
+            activities={filteredActivities}
+            title="Activity Feed (24h)"
+            onMemberClick={onMemberClick}
+            maxHeight="800px"
+            searchable
+          />
         </div>
         
         {/* Leaderboard */}

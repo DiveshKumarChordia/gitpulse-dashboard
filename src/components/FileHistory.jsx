@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
   Search, FileCode, Folder, ExternalLink, Code2, Loader2, 
   GitBranch, Check, ArrowRight, RotateCcw, Sparkles, GitCommit, 
   ChevronLeft, ChevronRight as ChevronRightIcon, History, Clock,
   GitPullRequest, GitMerge, User, Calendar, FileText, ChevronDown, 
   ChevronUp, Diff, Eye, AlertTriangle, Network, Trash2, Plus,
-  Layers, Globe, FolderTree, File, AlertCircle, Info
+  Layers, Globe, FolderTree, File, AlertCircle, Info, X, StopCircle
 } from 'lucide-react'
 import { fetchBranches, fetchRepoTree, getFileContent } from '../api/github'
 import { FileTree } from './FileTree'
@@ -15,12 +15,13 @@ const GITHUB_API_BASE = 'https://api.github.com'
 
 // ============ API FUNCTIONS ============
 
-// Fetch all commits for a file
-async function fetchFileCommits(token, owner, repo, path, branch = 'main') {
+async function fetchFileCommits(token, owner, repo, path, branch = 'main', signal) {
   const commits = []
   let page = 1
   
   while (page <= 10) {
+    if (signal?.aborted) throw new Error('Cancelled')
+    
     try {
       const response = await fetch(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}&per_page=100&page=${page}`,
@@ -30,6 +31,7 @@ async function fetchFileCommits(token, owner, repo, path, branch = 'main') {
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'GitPulse-Dashboard',
           },
+          signal,
         }
       )
       
@@ -51,7 +53,6 @@ async function fetchFileCommits(token, owner, repo, path, branch = 'main') {
   return commits
 }
 
-// Fetch file content at specific commit
 async function fetchFileAtCommit(token, owner, repo, path, commitSha) {
   try {
     const response = await fetch(
@@ -76,14 +77,15 @@ async function fetchFileAtCommit(token, owner, repo, path, commitSha) {
   }
 }
 
-// Fetch all commits in repo (for excavation) - with file details
-async function fetchAllRepoCommits(token, owner, repo, branch, onProgress, maxPages = 20) {
+async function fetchAllRepoCommits(token, owner, repo, branch, onProgress, maxPages = 20, signal) {
   const commits = []
   let page = 1
   
   while (page <= maxPages) {
+    if (signal?.aborted) throw new Error('Cancelled')
+    
     try {
-      onProgress?.({ page, status: `Loading commits (page ${page})...` })
+      onProgress?.({ page, status: `Loading commits (page ${page})...`, currentBranch: branch })
       
       const response = await fetch(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=100&page=${page}`,
@@ -93,6 +95,7 @@ async function fetchAllRepoCommits(token, owner, repo, branch, onProgress, maxPa
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'GitPulse-Dashboard',
           },
+          signal,
         }
       )
       
@@ -104,7 +107,7 @@ async function fetchAllRepoCommits(token, owner, repo, branch, onProgress, maxPa
       const data = await response.json()
       commits.push(...data)
       
-      onProgress?.({ page, total: commits.length, status: `Loaded ${commits.length} commits` })
+      onProgress?.({ page, total: commits.length, status: `Loaded ${commits.length} commits`, currentBranch: branch })
       
       if (data.length < 100) break
       page++
@@ -116,8 +119,9 @@ async function fetchAllRepoCommits(token, owner, repo, branch, onProgress, maxPa
   return commits
 }
 
-// Fetch commit details with files changed
-async function fetchCommitDetails(token, owner, repo, commitSha) {
+async function fetchCommitDetails(token, owner, repo, commitSha, signal) {
+  if (signal?.aborted) throw new Error('Cancelled')
+  
   try {
     const response = await fetch(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${commitSha}`,
@@ -127,29 +131,29 @@ async function fetchCommitDetails(token, owner, repo, commitSha) {
           'Accept': 'application/vnd.github.v3+json',
           'User-Agent': 'GitPulse-Dashboard',
         },
+        signal,
       }
     )
     
     if (!response.ok) return null
     return await response.json()
   } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Cancelled')
     return null
   }
 }
 
-// Search through all commits for a term - BRANCH LEVEL
-async function searchInBranch(token, owner, repo, query, branch, onProgress) {
-  const commits = await fetchAllRepoCommits(token, owner, repo, branch, onProgress)
+async function searchInBranch(token, owner, repo, query, branch, onProgress, signal) {
+  const commits = await fetchAllRepoCommits(token, owner, repo, branch, onProgress, 10, signal)
   
   const results = {
     commitMessages: [],
-    filesModified: new Map(), // Map of filename -> array of commits
+    filesModified: new Map(),
   }
   
   const lowerQuery = query.toLowerCase()
   
-  // First pass: search commit messages
-  onProgress?.({ status: 'Searching commit messages...' })
+  onProgress?.({ status: 'Searching commit messages...', currentBranch: branch })
   for (const commit of commits) {
     if (commit.commit.message.toLowerCase().includes(lowerQuery)) {
       results.commitMessages.push({
@@ -166,25 +170,29 @@ async function searchInBranch(token, owner, repo, query, branch, onProgress) {
     }
   }
   
-  // Second pass: get file details for matching commits (up to 50 for speed)
-  const commitsToCheck = results.commitMessages.slice(0, 50)
-  onProgress?.({ status: `Getting file details for ${commitsToCheck.length} commits...` })
-  
+  // Get file details (limited for speed)
+  const commitsToCheck = results.commitMessages.slice(0, 30)
   for (let i = 0; i < commitsToCheck.length; i++) {
-    const commit = commitsToCheck[i]
-    onProgress?.({ status: `Checking commit ${i + 1}/${commitsToCheck.length}...` })
+    if (signal?.aborted) throw new Error('Cancelled')
     
-    const details = await fetchCommitDetails(token, owner, repo, commit.sha)
+    const commit = commitsToCheck[i]
+    onProgress?.({ 
+      status: `Getting files for commit ${i + 1}/${commitsToCheck.length}...`, 
+      currentBranch: branch,
+      currentFile: commit.shortSha,
+      progress: Math.round((i / commitsToCheck.length) * 100)
+    })
+    
+    const details = await fetchCommitDetails(token, owner, repo, commit.sha, signal)
     if (details?.files) {
       commit.files = details.files.map(f => ({
         filename: f.filename,
-        status: f.status, // added, modified, removed
+        status: f.status,
         additions: f.additions,
         deletions: f.deletions,
         changes: f.changes,
       }))
       
-      // Track files modified
       for (const file of details.files) {
         if (!results.filesModified.has(file.filename)) {
           results.filesModified.set(file.filename, [])
@@ -202,32 +210,34 @@ async function searchInBranch(token, owner, repo, query, branch, onProgress) {
   return results
 }
 
-// Search across ALL branches - REPO LEVEL
-async function searchAcrossAllBranches(token, owner, repo, query, branches, onProgress) {
+async function searchAcrossAllBranches(token, owner, repo, query, branches, onProgress, signal) {
   const allResults = {
     commitMessages: [],
     filesModified: new Map(),
     branchesSearched: [],
   }
   
-  const seenCommits = new Set() // Dedupe across branches
+  const seenCommits = new Set()
   
   for (let i = 0; i < branches.length; i++) {
+    if (signal?.aborted) throw new Error('Cancelled')
+    
     const branch = branches[i]
     onProgress?.({ 
-      status: `Searching branch: ${branch.name} (${i + 1}/${branches.length})...`,
-      branchProgress: { current: i + 1, total: branches.length }
+      status: `Searching branch: ${branch.name}`,
+      branchProgress: { current: i + 1, total: branches.length },
+      currentBranch: branch.name,
     })
     
     try {
       const branchResults = await searchInBranch(
         token, owner, repo, query, branch.name,
-        (p) => onProgress?.({ ...p, currentBranch: branch.name })
+        (p) => onProgress?.({ ...p, currentBranch: branch.name, branchProgress: { current: i + 1, total: branches.length } }),
+        signal
       )
       
       allResults.branchesSearched.push(branch.name)
       
-      // Merge results (dedupe by commit sha)
       for (const commit of branchResults.commitMessages) {
         if (!seenCommits.has(commit.sha)) {
           seenCommits.add(commit.sha)
@@ -235,34 +245,35 @@ async function searchAcrossAllBranches(token, owner, repo, query, branches, onPr
         }
       }
       
-      // Merge file results
       for (const [filename, commits] of branchResults.filesModified) {
         if (!allResults.filesModified.has(filename)) {
           allResults.filesModified.set(filename, [])
         }
         for (const commit of commits) {
-          if (!seenCommits.has(`${commit.sha}-${filename}`)) {
-            seenCommits.add(`${commit.sha}-${filename}`)
+          const key = `${commit.sha}-${filename}`
+          if (!seenCommits.has(key)) {
+            seenCommits.add(key)
             allResults.filesModified.get(filename).push(commit)
           }
         }
       }
     } catch (e) {
+      if (e.message === 'Cancelled') throw e
       console.warn(`Failed to search branch ${branch.name}:`, e)
     }
   }
   
-  // Sort by date
   allResults.commitMessages.sort((a, b) => new Date(b.date) - new Date(a.date))
   
   return allResults
 }
 
-// Fetch PRs associated with commits
-async function fetchPRsForCommits(token, owner, repo, commitShas) {
+async function fetchPRsForCommits(token, owner, repo, commitShas, signal) {
   const prs = new Map()
   
   for (const sha of commitShas.slice(0, 10)) {
+    if (signal?.aborted) return Array.from(prs.values())
+    
     try {
       const response = await fetch(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${sha}/pulls`,
@@ -272,6 +283,7 @@ async function fetchPRsForCommits(token, owner, repo, commitShas) {
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'GitPulse-Dashboard',
           },
+          signal,
         }
       )
       
@@ -297,6 +309,64 @@ async function fetchPRsForCommits(token, owner, repo, commitShas) {
 }
 
 // ============ COMPONENTS ============
+
+function ProgressBar({ progress }) {
+  if (!progress) return null
+  
+  const percentage = progress.progress || 0
+  const branchPercentage = progress.branchProgress 
+    ? Math.round((progress.branchProgress.current / progress.branchProgress.total) * 100) 
+    : null
+  
+  return (
+    <div className="mt-4 space-y-3">
+      {/* Main progress */}
+      <div className="flex items-center gap-3">
+        <Loader2 className="w-4 h-4 animate-spin text-purple-400 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-frost-100 truncate">{progress.status}</p>
+          {progress.currentBranch && (
+            <p className="text-xs text-teal-400 flex items-center gap-1 mt-0.5">
+              <GitBranch className="w-3 h-3" /> {progress.currentBranch}
+            </p>
+          )}
+        </div>
+      </div>
+      
+      {/* Branch progress bar */}
+      {progress.branchProgress && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs text-frost-300/60">
+            <span>Branch {progress.branchProgress.current} of {progress.branchProgress.total}</span>
+            <span>{branchPercentage}%</span>
+          </div>
+          <div className="h-2 bg-void-600/50 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300" 
+              style={{ width: `${branchPercentage}%` }} 
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* File progress */}
+      {percentage > 0 && !progress.branchProgress && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs text-frost-300/60">
+            <span>Loading file details</span>
+            <span>{percentage}%</span>
+          </div>
+          <div className="h-1.5 bg-void-600/50 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-electric-400 transition-all duration-300" 
+              style={{ width: `${percentage}%` }} 
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function CommitCard({ commit, org, repo, showBranch = false, showFiles = false }) {
   const [expanded, setExpanded] = useState(false)
@@ -326,19 +396,13 @@ function CommitCard({ commit, org, repo, showBranch = false, showFiles = false }
           </div>
           <p className="text-frost-100 text-sm">{commit.message}</p>
           <div className="flex items-center gap-2 mt-2">
-            {commit.avatarUrl && (
-              <img src={commit.avatarUrl} alt={commit.author} className="w-4 h-4 rounded-full" />
-            )}
+            {commit.avatarUrl && <img src={commit.avatarUrl} alt={commit.author} className="w-4 h-4 rounded-full" />}
             <span className="text-xs text-frost-300/60">{commit.author}</span>
           </div>
           
-          {/* Files Changed */}
           {showFiles && commit.files && commit.files.length > 0 && (
             <div className="mt-3">
-              <button 
-                onClick={() => setExpanded(!expanded)}
-                className="text-xs text-electric-400 hover:text-electric-500 flex items-center gap-1"
-              >
+              <button onClick={() => setExpanded(!expanded)} className="text-xs text-electric-400 hover:text-electric-500 flex items-center gap-1">
                 {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 {commit.files.length} files changed
               </button>
@@ -363,12 +427,7 @@ function CommitCard({ commit, org, repo, showBranch = false, showFiles = false }
             </div>
           )}
         </div>
-        <a 
-          href={commitUrl} 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0"
-        >
+        <a href={commitUrl} target="_blank" rel="noopener noreferrer" className="p-2 hover:bg-void-600/50 rounded-lg transition-colors flex-shrink-0">
           <ExternalLink className="w-4 h-4 text-frost-300/60 hover:text-neon-green" />
         </a>
       </div>
@@ -389,20 +448,14 @@ function FileVersionCard({ commit, org, repo, filePath, onViewContent, viewingCo
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <a href={commitUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-frost-300/50 hover:text-electric-400 transition-colors">
-              {commit.shortSha}
-            </a>
+            <a href={commitUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-frost-300/50 hover:text-electric-400 transition-colors">{commit.shortSha}</a>
             <span className="text-xs text-frost-300/60">{new Date(commit.date).toLocaleDateString()}</span>
           </div>
           <p className="text-frost-100 text-sm line-clamp-1">{commit.message}</p>
           <span className="text-xs text-frost-300/60 mt-1 block">{commit.author}</span>
         </div>
         <div className="flex items-center gap-1">
-          <button 
-            onClick={() => onViewContent(commit.sha)}
-            className={`p-2 rounded-lg transition-colors ${isViewing ? 'bg-electric-400 text-void-900' : 'hover:bg-void-600/50'}`}
-            title="View file at this commit"
-          >
+          <button onClick={() => onViewContent(commit.sha)} className={`p-2 rounded-lg transition-colors ${isViewing ? 'bg-electric-400 text-void-900' : 'hover:bg-void-600/50'}`} title="View file at this commit">
             <Eye className={`w-4 h-4 ${isViewing ? '' : 'text-frost-300/60'}`} />
           </button>
           <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="p-2 hover:bg-void-600/50 rounded-lg transition-colors" title="View on GitHub">
@@ -419,10 +472,7 @@ function FileCard({ filename, commits, org, repo }) {
   
   return (
     <div className="bg-void-700/30 border border-void-600/50 rounded-xl overflow-hidden">
-      <button 
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 p-4 hover:bg-void-700/50 transition-colors"
-      >
+      <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center gap-3 p-4 hover:bg-void-700/50 transition-colors">
         <File className="w-4 h-4 text-yellow-400 flex-shrink-0" />
         <span className="text-sm text-frost-200 font-mono truncate flex-1 text-left">{filename}</span>
         <span className="text-xs px-2 py-1 bg-purple-500/20 text-purple-400 rounded">{commits.length} changes</span>
@@ -431,17 +481,10 @@ function FileCard({ filename, commits, org, repo }) {
       {expanded && (
         <div className="border-t border-void-600/30 p-3 space-y-2 max-h-64 overflow-y-auto">
           {commits.slice(0, 10).map((commit, i) => (
-            <a 
-              key={`${commit.sha}-${i}`}
-              href={`https://github.com/${org}/${repo}/commit/${commit.sha}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 p-2 rounded-lg hover:bg-void-600/30 transition-colors"
-            >
+            <a key={`${commit.sha}-${i}`} href={`https://github.com/${org}/${repo}/commit/${commit.sha}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 rounded-lg hover:bg-void-600/30 transition-colors">
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                 commit.fileStatus === 'added' ? 'bg-green-500/20 text-green-400' :
-                commit.fileStatus === 'removed' ? 'bg-red-500/20 text-red-400' :
-                'bg-yellow-500/20 text-yellow-400'
+                commit.fileStatus === 'removed' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
               }`}>
                 {commit.fileStatus === 'added' ? 'A' : commit.fileStatus === 'removed' ? 'D' : 'M'}
               </span>
@@ -450,9 +493,7 @@ function FileCard({ filename, commits, org, repo }) {
               <span className="text-xs text-frost-300/40">{new Date(commit.date).toLocaleDateString()}</span>
             </a>
           ))}
-          {commits.length > 10 && (
-            <p className="text-xs text-frost-300/50 text-center py-2">+{commits.length - 10} more changes</p>
-          )}
+          {commits.length > 10 && <p className="text-xs text-frost-300/50 text-center py-2">+{commits.length - 10} more changes</p>}
         </div>
       )}
     </div>
@@ -481,9 +522,8 @@ export function FileHistory({ token, org, allRepos }) {
   const [tree, setTree] = useState([])
   const [loadingTree, setLoadingTree] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
-  const [mode, setMode] = useState('file') // 'file' | 'excavation'
+  const [mode, setMode] = useState('file')
   
-  // File history state
   const [fileCommits, setFileCommits] = useState([])
   const [loadingFileHistory, setLoadingFileHistory] = useState(false)
   const [viewingCommit, setViewingCommit] = useState(null)
@@ -491,16 +531,29 @@ export function FileHistory({ token, org, allRepos }) {
   const [loadingContent, setLoadingContent] = useState(false)
   const [historyPage, setHistoryPage] = useState(0)
   
-  // Excavation state
   const [excavationQuery, setExcavationQuery] = useState('')
   const [excavationResults, setExcavationResults] = useState(null)
   const [loadingExcavation, setLoadingExcavation] = useState(false)
   const [excavationProgress, setExcavationProgress] = useState(null)
   const [associatedPRs, setAssociatedPRs] = useState([])
-  const [excavationScope, setExcavationScope] = useState('branch') // 'branch' | 'repo'
-  const [activeResultTab, setActiveResultTab] = useState('commits') // 'commits' | 'files'
+  const [excavationScope, setExcavationScope] = useState('branch')
+  const [activeResultTab, setActiveResultTab] = useState('commits')
+  
+  // AbortController for cancelling
+  const abortControllerRef = useRef(null)
   
   const toast = useToast()
+
+  // Cancel any ongoing search
+  const cancelSearch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    setLoadingExcavation(false)
+    setExcavationProgress(null)
+    toast.info('Search cancelled')
+  }
 
   if (!token || !org) {
     return (
@@ -514,12 +567,16 @@ export function FileHistory({ token, org, allRepos }) {
   const filteredRepos = (allRepos || []).filter(repo => repo.name.toLowerCase().includes(repoSearch.toLowerCase()))
 
   const handleSelectRepo = async (repo) => {
+    // Cancel any ongoing search
+    cancelSearch()
+    
     setSelectedRepo(repo)
     setSelectedBranch(null)
     setSelectedFile(null)
     setFileCommits([])
     setFileContent(null)
     setExcavationResults(null)
+    setExcavationQuery('')
     setLoadingBranches(true)
     
     try {
@@ -619,11 +676,19 @@ export function FileHistory({ token, org, allRepos }) {
     e?.preventDefault()
     if (!excavationQuery.trim() || !selectedRepo) return
     
-    // Check if branch is selected for branch-level search
     if (excavationScope === 'branch' && !selectedBranch) {
       toast.warning('Please select a branch first')
       return
     }
+    
+    // Cancel any previous search
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    // Create new abort controller
+    abortControllerRef.current = new AbortController()
+    const signal = abortControllerRef.current.signal
     
     setLoadingExcavation(true)
     setExcavationResults(null)
@@ -634,16 +699,14 @@ export function FileHistory({ token, org, allRepos }) {
       let results
       
       if (excavationScope === 'repo') {
-        // Search across ALL branches
         toast.info(`Searching across ${branches.length} branches...`)
         results = await searchAcrossAllBranches(
-          token, org, selectedRepo.name, excavationQuery, branches, setExcavationProgress
+          token, org, selectedRepo.name, excavationQuery, branches, setExcavationProgress, signal
         )
         toast.success(`Found ${results.commitMessages.length} commits across ${results.branchesSearched.length} branches`)
       } else {
-        // Search single branch
         results = await searchInBranch(
-          token, org, selectedRepo.name, excavationQuery, selectedBranch, setExcavationProgress
+          token, org, selectedRepo.name, excavationQuery, selectedBranch, setExcavationProgress, signal
         )
         toast.success(`Found ${results.commitMessages.length} commits, ${results.filesModified.size} files`)
       }
@@ -652,18 +715,24 @@ export function FileHistory({ token, org, allRepos }) {
       
       if (results.commitMessages.length > 0) {
         const commitShas = results.commitMessages.map(c => c.sha)
-        const prs = await fetchPRsForCommits(token, org, selectedRepo.name, commitShas)
+        const prs = await fetchPRsForCommits(token, org, selectedRepo.name, commitShas, signal)
         setAssociatedPRs(prs)
       }
     } catch (e) {
-      toast.apiError(e.message || 'Excavation failed')
+      if (e.message === 'Cancelled') {
+        // Already handled
+      } else {
+        toast.apiError(e.message || 'Excavation failed')
+      }
     } finally {
       setLoadingExcavation(false)
       setExcavationProgress(null)
+      abortControllerRef.current = null
     }
   }
 
   const handleReset = () => {
+    cancelSearch()
     setSelectedRepo(null)
     setSelectedBranch(null)
     setSelectedFile(null)
@@ -681,8 +750,6 @@ export function FileHistory({ token, org, allRepos }) {
   const COMMITS_PER_PAGE = 10
   const totalHistoryPages = Math.ceil(fileCommits.length / COMMITS_PER_PAGE)
   const displayedCommits = fileCommits.slice(historyPage * COMMITS_PER_PAGE, (historyPage + 1) * COMMITS_PER_PAGE)
-
-  // Convert filesModified Map to array for display
   const filesArray = excavationResults ? Array.from(excavationResults.filesModified.entries()).map(([filename, commits]) => ({ filename, commits })).sort((a, b) => b.commits.length - a.commits.length) : []
 
   return (
@@ -691,9 +758,7 @@ export function FileHistory({ token, org, allRepos }) {
       <div className="bg-gradient-to-br from-orange-500/10 via-red-500/5 to-purple-500/10 border border-orange-500/30 rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-500/20 rounded-xl">
-              <History className="w-5 h-5 text-orange-400" />
-            </div>
+            <div className="p-2 bg-orange-500/20 rounded-xl"><History className="w-5 h-5 text-orange-400" /></div>
             <div>
               <h2 className="text-frost-100 font-semibold text-lg">File History & Repository Excavation</h2>
               <p className="text-xs text-frost-300/60">Deep dive into file history, find deleted code, explore commit timeline</p>
@@ -730,32 +795,19 @@ export function FileHistory({ token, org, allRepos }) {
                 <span className="text-frost-100 font-medium">{selectedRepo.name}</span>
               </div>
               
-              {/* Branch Selector - Enhanced */}
               <div className="flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-teal-400" />
-                <select 
-                  value={selectedBranch || ''} 
-                  onChange={(e) => handleBranchChange(e.target.value)}
-                  className="px-3 py-2 bg-void-700/50 border border-void-600/50 rounded-lg text-frost-100 text-sm focus:outline-none focus:border-teal-400/50"
-                >
-                  {branches.map(b => (
-                    <option key={b.name} value={b.name}>{b.name}</option>
-                  ))}
+                <select value={selectedBranch || ''} onChange={(e) => handleBranchChange(e.target.value)} className="px-3 py-2 bg-void-700/50 border border-void-600/50 rounded-lg text-frost-100 text-sm focus:outline-none focus:border-teal-400/50">
+                  {branches.map(b => (<option key={b.name} value={b.name}>{b.name}</option>))}
                 </select>
                 <span className="text-xs text-frost-300/50">({branches.length} branches)</span>
               </div>
               
               <div className="flex items-center gap-2 ml-auto">
-                <button
-                  onClick={() => setMode('file')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${mode === 'file' ? 'bg-orange-500/20 text-orange-400 border border-orange-400/30' : 'bg-void-700/30 text-frost-300/60 hover:text-frost-200'}`}
-                >
+                <button onClick={() => setMode('file')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${mode === 'file' ? 'bg-orange-500/20 text-orange-400 border border-orange-400/30' : 'bg-void-700/30 text-frost-300/60 hover:text-frost-200'}`}>
                   <FileText className="w-4 h-4" /> File History
                 </button>
-                <button
-                  onClick={() => setMode('excavation')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${mode === 'excavation' ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' : 'bg-void-700/30 text-frost-300/60 hover:text-frost-200'}`}
-                >
+                <button onClick={() => setMode('excavation')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${mode === 'excavation' ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' : 'bg-void-700/30 text-frost-300/60 hover:text-frost-200'}`}>
                   <Network className="w-4 h-4" /> Deep Excavation
                 </button>
               </div>
@@ -767,11 +819,8 @@ export function FileHistory({ token, org, allRepos }) {
       {/* File History Mode */}
       {selectedRepo && mode === 'file' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* File Tree */}
           <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-4 lg:col-span-1">
-            <h3 className="text-frost-100 font-medium mb-4 flex items-center gap-2">
-              <Folder className="w-4 h-4 text-yellow-400" /> Repository Files
-            </h3>
+            <h3 className="text-frost-100 font-medium mb-4 flex items-center gap-2"><Folder className="w-4 h-4 text-yellow-400" /> Repository Files</h3>
             {loadingTree ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 text-orange-400 animate-spin" /></div>
             ) : (
@@ -781,7 +830,6 @@ export function FileHistory({ token, org, allRepos }) {
             )}
           </div>
 
-          {/* File History & Content */}
           <div className="lg:col-span-2 space-y-4">
             {!selectedFile ? (
               <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-8 text-center">
@@ -811,9 +859,7 @@ export function FileHistory({ token, org, allRepos }) {
                     <div className="space-y-3">
                       <h4 className="text-sm text-frost-300/60 font-medium flex items-center gap-2"><Clock className="w-4 h-4" /> Commit History</h4>
                       <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                        {displayedCommits.map(commit => (
-                          <FileVersionCard key={commit.sha} commit={commit} org={org} repo={selectedRepo.name} filePath={selectedFile} onViewContent={loadFileContent} viewingCommit={viewingCommit} />
-                        ))}
+                        {displayedCommits.map(commit => (<FileVersionCard key={commit.sha} commit={commit} org={org} repo={selectedRepo.name} filePath={selectedFile} onViewContent={loadFileContent} viewingCommit={viewingCommit} />))}
                       </div>
                       <Pagination currentPage={historyPage} totalPages={totalHistoryPages} onPageChange={setHistoryPage} />
                     </div>
@@ -833,10 +879,7 @@ export function FileHistory({ token, org, allRepos }) {
                         ) : fileContent ? (
                           <pre className="p-4 text-xs font-mono text-frost-300/80 whitespace-pre-wrap"><code>{fileContent}</code></pre>
                         ) : fileContent === null && viewingCommit ? (
-                          <div className="p-8 text-center">
-                            <Trash2 className="w-8 h-8 text-red-400/50 mx-auto mb-3" />
-                            <p className="text-frost-300/60 text-sm">File did not exist at this commit</p>
-                          </div>
+                          <div className="p-8 text-center"><Trash2 className="w-8 h-8 text-red-400/50 mx-auto mb-3" /><p className="text-frost-300/60 text-sm">File did not exist at this commit</p></div>
                         ) : (
                           <div className="p-8 text-center text-frost-300/40"><Eye className="w-8 h-8 mx-auto mb-3 opacity-50" /><p>Click a version to preview</p></div>
                         )}
@@ -853,12 +896,9 @@ export function FileHistory({ token, org, allRepos }) {
       {/* Deep Excavation Mode */}
       {selectedRepo && mode === 'excavation' && (
         <div className="space-y-6">
-          {/* Excavation Controls */}
           <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-purple-500/20 rounded-xl">
-                <Network className="w-5 h-5 text-purple-400" />
-              </div>
+              <div className="p-2 bg-purple-500/20 rounded-xl"><Network className="w-5 h-5 text-purple-400" /></div>
               <div className="flex-1">
                 <h3 className="text-frost-100 font-semibold">Deep Repository Excavation</h3>
                 <p className="text-xs text-frost-300/60">Search through ALL commits - find deleted code, old implementations, file history</p>
@@ -869,39 +909,21 @@ export function FileHistory({ token, org, allRepos }) {
             <div className="flex items-center gap-4 mb-4 p-3 bg-void-600/30 rounded-xl">
               <span className="text-sm text-frost-300/60">Search Scope:</span>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setExcavationScope('branch')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
-                    excavationScope === 'branch' 
-                      ? 'bg-teal-400/20 text-teal-400 border border-teal-400/30' 
-                      : 'bg-void-700/50 text-frost-300/60 hover:text-frost-200'
-                  }`}
-                >
-                  <GitBranch className="w-4 h-4" />
-                  Branch Level
+                <button onClick={() => setExcavationScope('branch')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${excavationScope === 'branch' ? 'bg-teal-400/20 text-teal-400 border border-teal-400/30' : 'bg-void-700/50 text-frost-300/60 hover:text-frost-200'}`}>
+                  <GitBranch className="w-4 h-4" />Branch Level
                   {selectedBranch && <span className="text-xs opacity-70">({selectedBranch})</span>}
                 </button>
-                <button
-                  onClick={() => setExcavationScope('repo')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
-                    excavationScope === 'repo' 
-                      ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' 
-                      : 'bg-void-700/50 text-frost-300/60 hover:text-frost-200'
-                  }`}
-                >
-                  <Globe className="w-4 h-4" />
-                  All Branches
+                <button onClick={() => setExcavationScope('repo')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${excavationScope === 'repo' ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30' : 'bg-void-700/50 text-frost-300/60 hover:text-frost-200'}`}>
+                  <Globe className="w-4 h-4" />All Branches
                   <span className="text-xs opacity-70">({branches.length})</span>
                 </button>
               </div>
             </div>
             
             {/* Info Banner */}
-            <div className={`flex items-center gap-3 mb-4 p-3 rounded-xl ${
-              excavationScope === 'branch' ? 'bg-teal-400/10 border border-teal-400/20' : 'bg-purple-500/10 border border-purple-500/20'
-            }`}>
+            <div className={`flex items-center gap-3 mb-4 p-3 rounded-xl ${excavationScope === 'branch' ? 'bg-teal-400/10 border border-teal-400/20' : 'bg-purple-500/10 border border-purple-500/20'}`}>
               <Info className={`w-5 h-5 flex-shrink-0 ${excavationScope === 'branch' ? 'text-teal-400' : 'text-purple-400'}`} />
-              <p className="text-xs text-frost-300/70">
+              <p className="text-xs text-frost-300/70 flex-1">
                 {excavationScope === 'branch' 
                   ? `Searching in branch "${selectedBranch}". Results will include commit messages and files modified.`
                   : `Searching across ALL ${branches.length} branches. This may take longer but finds everything.`
@@ -909,6 +931,7 @@ export function FileHistory({ token, org, allRepos }) {
               </p>
             </div>
             
+            {/* Search Form */}
             <form onSubmit={handleExcavation} className="flex gap-2">
               <input 
                 type="text" 
@@ -916,80 +939,59 @@ export function FileHistory({ token, org, allRepos }) {
                 onChange={(e) => setExcavationQuery(e.target.value)} 
                 placeholder="Search commit messages, function names, old code..." 
                 className="flex-1 px-4 py-3 bg-void-700/50 border border-void-600/50 rounded-xl text-frost-100 placeholder-frost-300/40 text-sm focus:outline-none focus:border-purple-400/50 focus:ring-2 focus:ring-purple-400/25" 
+                disabled={loadingExcavation}
               />
-              <button 
-                type="submit" 
-                disabled={loadingExcavation || !excavationQuery.trim()} 
-                className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2 hover:opacity-90 transition-opacity"
-              >
-                {loadingExcavation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                Excavate
-              </button>
+              {loadingExcavation ? (
+                <button 
+                  type="button"
+                  onClick={cancelSearch}
+                  className="px-6 py-3 bg-red-500/80 hover:bg-red-500 text-white font-semibold rounded-xl flex items-center gap-2 transition-colors"
+                >
+                  <StopCircle className="w-4 h-4" />
+                  Cancel
+                </button>
+              ) : (
+                <button 
+                  type="submit" 
+                  disabled={!excavationQuery.trim()} 
+                  className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2 hover:opacity-90 transition-opacity"
+                >
+                  <Search className="w-4 h-4" />
+                  Excavate
+                </button>
+              )}
             </form>
             
-            {excavationProgress && (
-              <div className="mt-4">
-                <div className="flex items-center gap-3 text-sm text-frost-300/60">
-                  <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
-                  {excavationProgress.status}
-                  {excavationProgress.branchProgress && (
-                    <span className="text-purple-400">
-                      (Branch {excavationProgress.branchProgress.current}/{excavationProgress.branchProgress.total})
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            {/* Progress Bar */}
+            <ProgressBar progress={excavationProgress} />
           </div>
 
           {/* Results */}
           {excavationResults && (
             <div className="space-y-6">
-              {/* Results Summary */}
               <div className="flex items-center gap-4 p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
                 <Sparkles className="w-5 h-5 text-purple-400" />
                 <div className="flex-1">
-                  <p className="text-frost-100 font-medium">
-                    Found {excavationResults.commitMessages.length} commits, {filesArray.length} files modified
-                  </p>
-                  {excavationResults.branchesSearched && (
-                    <p className="text-xs text-frost-300/50">Searched {excavationResults.branchesSearched.length} branches</p>
-                  )}
+                  <p className="text-frost-100 font-medium">Found {excavationResults.commitMessages.length} commits, {filesArray.length} files modified</p>
+                  {excavationResults.branchesSearched && <p className="text-xs text-frost-300/50">Searched {excavationResults.branchesSearched.length} branches</p>}
                 </div>
               </div>
               
-              {/* Tabs for Results */}
+              {/* Tabs */}
               <div className="flex items-center gap-2 p-1 bg-void-700/30 rounded-xl w-fit border border-void-600/50">
-                <button
-                  onClick={() => setActiveResultTab('commits')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
-                    activeResultTab === 'commits' 
-                      ? 'bg-neon-green/20 text-neon-green font-medium' 
-                      : 'text-frost-300/60 hover:text-frost-200'
-                  }`}
-                >
-                  <GitCommit className="w-4 h-4" />
-                  Commits ({excavationResults.commitMessages.length})
+                <button onClick={() => setActiveResultTab('commits')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${activeResultTab === 'commits' ? 'bg-neon-green/20 text-neon-green font-medium' : 'text-frost-300/60 hover:text-frost-200'}`}>
+                  <GitCommit className="w-4 h-4" />Commits ({excavationResults.commitMessages.length})
                 </button>
-                <button
-                  onClick={() => setActiveResultTab('files')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
-                    activeResultTab === 'files' 
-                      ? 'bg-yellow-400/20 text-yellow-400 font-medium' 
-                      : 'text-frost-300/60 hover:text-frost-200'
-                  }`}
-                >
-                  <FolderTree className="w-4 h-4" />
-                  Files ({filesArray.length})
+                <button onClick={() => setActiveResultTab('files')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${activeResultTab === 'files' ? 'bg-yellow-400/20 text-yellow-400 font-medium' : 'text-frost-300/60 hover:text-frost-200'}`}>
+                  <FolderTree className="w-4 h-4" />Files ({filesArray.length})
                 </button>
               </div>
 
-              {/* Associated PRs */}
+              {/* PRs */}
               {associatedPRs.length > 0 && (
                 <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
                   <h4 className="text-frost-100 font-medium mb-4 flex items-center gap-2">
-                    <GitPullRequest className="w-4 h-4 text-purple-400" />
-                    Associated Pull Requests ({associatedPRs.length})
+                    <GitPullRequest className="w-4 h-4 text-purple-400" />Associated Pull Requests ({associatedPRs.length})
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {associatedPRs.map(pr => (
@@ -1009,26 +1011,13 @@ export function FileHistory({ token, org, allRepos }) {
               {/* Commits Tab */}
               {activeResultTab === 'commits' && (
                 <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
-                  <h4 className="text-frost-100 font-medium mb-4 flex items-center gap-2">
-                    <GitCommit className="w-4 h-4 text-neon-green" />
-                    Matching Commits
-                  </h4>
+                  <h4 className="text-frost-100 font-medium mb-4 flex items-center gap-2"><GitCommit className="w-4 h-4 text-neon-green" />Matching Commits</h4>
                   {excavationResults.commitMessages.length === 0 ? (
-                    <div className="text-center py-8 text-frost-300/60">
-                      <Search className="w-8 h-8 mx-auto mb-3 opacity-50" />
-                      <p>No commits found matching "{excavationQuery}"</p>
-                    </div>
+                    <div className="text-center py-8 text-frost-300/60"><Search className="w-8 h-8 mx-auto mb-3 opacity-50" /><p>No commits found matching "{excavationQuery}"</p></div>
                   ) : (
                     <div className="space-y-3 max-h-[600px] overflow-y-auto">
                       {excavationResults.commitMessages.map(commit => (
-                        <CommitCard 
-                          key={commit.sha} 
-                          commit={commit} 
-                          org={org} 
-                          repo={selectedRepo.name} 
-                          showBranch={excavationScope === 'repo'}
-                          showFiles
-                        />
+                        <CommitCard key={commit.sha} commit={commit} org={org} repo={selectedRepo.name} showBranch={excavationScope === 'repo'} showFiles />
                       ))}
                     </div>
                   )}
@@ -1038,20 +1027,12 @@ export function FileHistory({ token, org, allRepos }) {
               {/* Files Tab */}
               {activeResultTab === 'files' && (
                 <div className="bg-void-700/30 border border-void-600/50 rounded-2xl p-6">
-                  <h4 className="text-frost-100 font-medium mb-4 flex items-center gap-2">
-                    <FolderTree className="w-4 h-4 text-yellow-400" />
-                    Files Modified
-                  </h4>
+                  <h4 className="text-frost-100 font-medium mb-4 flex items-center gap-2"><FolderTree className="w-4 h-4 text-yellow-400" />Files Modified</h4>
                   {filesArray.length === 0 ? (
-                    <div className="text-center py-8 text-frost-300/60">
-                      <Folder className="w-8 h-8 mx-auto mb-3 opacity-50" />
-                      <p>No file data available (check more commits)</p>
-                    </div>
+                    <div className="text-center py-8 text-frost-300/60"><Folder className="w-8 h-8 mx-auto mb-3 opacity-50" /><p>No file data available (check more commits)</p></div>
                   ) : (
                     <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                      {filesArray.map(({ filename, commits }) => (
-                        <FileCard key={filename} filename={filename} commits={commits} org={org} repo={selectedRepo.name} />
-                      ))}
+                      {filesArray.map(({ filename, commits }) => (<FileCard key={filename} filename={filename} commits={commits} org={org} repo={selectedRepo.name} />))}
                     </div>
                   )}
                 </div>
