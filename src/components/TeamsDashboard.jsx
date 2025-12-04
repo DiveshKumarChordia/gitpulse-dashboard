@@ -292,6 +292,7 @@ export function TeamsDashboard({ token, org }) {
           token={token} 
           org={org} 
           members={members} 
+          repos={repos}
           onMemberClick={handleMemberClick}
         />
       )}
