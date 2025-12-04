@@ -18,10 +18,7 @@ export const LEADERBOARD_METRICS = [
   { key: 'prs', label: 'PRs', icon: GitPullRequest, description: 'Pull requests opened' },
   { key: 'merges', label: 'Merges', icon: GitMerge, description: 'PRs merged' },
   { key: 'reviews', label: 'Reviews', icon: Eye, description: 'Code reviews given' },
-  { key: 'approvals', label: 'Approvals', icon: CheckCircle, description: 'PRs approved' },
   { key: 'comments', label: 'Comments', icon: MessageSquare, description: 'Comments made' },
-  { key: 'linesAdded', label: 'Lines+', icon: Code, description: 'Lines of code added' },
-  { key: 'releases', label: 'Releases', icon: Rocket, description: 'Releases published' },
   { key: 'reposActive', label: 'Repos', icon: Folder, description: 'Repositories active in' },
 ]
 
@@ -42,25 +39,25 @@ function getRankStyle(index) {
     icon: Crown,
     color: 'text-yellow-400',
     ring: 'ring-yellow-400/50',
-    bg: 'from-yellow-400/15 to-orange-400/10 border-yellow-500/30',
+    bg: 'from-yellow-400/20 to-orange-400/10 border-yellow-500/40',
   }
   if (index === 1) return {
     icon: Medal,
     color: 'text-gray-300',
     ring: 'ring-gray-400/50',
-    bg: 'from-gray-400/15 to-gray-500/10 border-gray-500/30',
+    bg: 'from-gray-400/20 to-gray-500/10 border-gray-500/40',
   }
   if (index === 2) return {
     icon: Award,
     color: 'text-orange-400',
     ring: 'ring-orange-400/50',
-    bg: 'from-orange-400/15 to-red-400/10 border-orange-500/30',
+    bg: 'from-orange-400/20 to-red-400/10 border-orange-500/40',
   }
   return {
     icon: null,
     color: 'text-frost-300/60',
     ring: 'ring-void-600',
-    bg: 'from-transparent to-transparent border-void-600/50',
+    bg: 'from-void-700/30 to-void-700/20 border-void-600/50',
   }
 }
 
@@ -73,7 +70,7 @@ export function Leaderboard({
   onMemberClick,
 }) {
   const [metric, setMetric] = useState('total')
-  const [timeFilter, setTimeFilter] = useState('all') // Default to 'all' to show current stats
+  const [timeFilter, setTimeFilter] = useState('all')
   
   // Use stats directly when not filtering, or recalculate when filtering
   const filteredStats = useMemo(() => {
@@ -84,7 +81,7 @@ export function Leaderboard({
       return stats.map(s => ({
         ...s,
         reposActive: typeof s.reposActive === 'object' ? s.reposActive.size : (s.reposActive || 0),
-        total: s.total || (s.commits + s.prs + (s.merges || 0) + s.reviews + s.comments),
+        total: s.total || ((s.commits || 0) + (s.prs || 0) + (s.merges || 0) + (s.reviews || 0) + (s.comments || 0)),
       }))
     }
     
@@ -103,12 +100,7 @@ export function Leaderboard({
         prs: 0,
         merges: 0,
         reviews: 0,
-        approvals: 0,
         comments: 0,
-        branches: 0,
-        tags: 0,
-        releases: 0,
-        linesAdded: 0,
         reposActive: new Set(),
       }
     })
@@ -120,26 +112,21 @@ export function Leaderboard({
       const s = recalc[a.author]
       if (a.repo) s.reposActive.add(a.repo)
       
-      // Map activity types to stats
       const type = a.type
       if (type === 'commit' || type === 'push') {
         s.commits += a.commitCount || 1
-        s.linesAdded += a.additions || a.stats?.additions || 0
       }
       else if (type === 'pr_opened') s.prs++
       else if (type === 'pr_merged') s.merges++
-      else if (type === 'review_approved') { s.reviews++; s.approvals++ }
+      else if (type === 'review_approved') s.reviews++
       else if (type?.startsWith('review_')) s.reviews++
       else if (type?.includes('comment')) s.comments++
-      else if (type === 'release_published') s.releases++
-      else if (type === 'branch_created') s.branches++
-      else if (type === 'tag_created') s.tags++
     })
     
     return Object.values(recalc).map(s => ({
       ...s,
       reposActive: typeof s.reposActive === 'object' ? s.reposActive.size : s.reposActive,
-      total: s.commits + s.prs + (s.merges || 0) + s.reviews + s.comments,
+      total: (s.commits || 0) + (s.prs || 0) + (s.merges || 0) + (s.reviews || 0) + (s.comments || 0),
     }))
   }, [stats, activities, timeFilter, showFilters])
   
@@ -204,7 +191,7 @@ export function Leaderboard({
       </div>
       
       {/* Rankings */}
-      <div className="p-4 space-y-2 max-h-[600px] overflow-y-auto">
+      <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
         {sorted.map((s, i) => {
           const rank = getRankStyle(i)
           const RankIcon = rank.icon
@@ -214,14 +201,14 @@ export function Leaderboard({
             <div 
               key={s.login}
               onClick={() => onMemberClick?.(s.login)}
-              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all bg-gradient-to-r ${rank.bg} hover:scale-[1.01] hover:shadow-lg`}
+              className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all bg-gradient-to-r ${rank.bg} hover:scale-[1.01] hover:shadow-lg`}
             >
               {/* Rank */}
               <div className="w-8 flex justify-center flex-shrink-0">
                 {RankIcon ? (
                   <RankIcon className={`w-6 h-6 ${rank.color}`} />
                 ) : (
-                  <span className="text-sm font-mono text-frost-300/40">#{i + 1}</span>
+                  <span className="text-sm font-bold text-frost-300/50">#{i + 1}</span>
                 )}
               </div>
               
@@ -229,48 +216,51 @@ export function Leaderboard({
               <img 
                 src={s.avatarUrl} 
                 alt="" 
-                className={`w-10 h-10 rounded-full ring-2 ${rank.ring} flex-shrink-0`} 
+                className={`w-11 h-11 rounded-xl ring-2 ${rank.ring} flex-shrink-0`} 
               />
               
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-frost-100 truncate">{s.login}</span>
+              {/* Info - Fixed width issues */}
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-semibold text-frost-100 truncate block" title={s.login}>
+                    {s.login}
+                  </span>
                   {s.isInactive && (
-                    <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
+                    <span className="text-xs px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded flex-shrink-0">
                       Inactive
                     </span>
                   )}
                 </div>
                 
-                {/* Mini Stats */}
-                <div className="flex items-center gap-3 text-xs mt-1">
+                {/* Mini Stats - Wrapped properly */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                   <span className="text-neon-green flex items-center gap-1">
-                    <GitCommit className="w-3 h-3" />{s.commits}
+                    <GitCommit className="w-3 h-3" />{s.commits || 0}
                   </span>
                   <span className="text-purple-400 flex items-center gap-1">
-                    <GitPullRequest className="w-3 h-3" />{s.prs}
+                    <GitPullRequest className="w-3 h-3" />{s.prs || 0}
                   </span>
                   <span className="text-fuchsia-400 flex items-center gap-1">
                     <GitMerge className="w-3 h-3" />{s.merges || 0}
                   </span>
-                  <span className="text-electric-400 flex items-center gap-1">
-                    <Eye className="w-3 h-3" />{s.reviews}
+                  <span className="text-cyan-400 flex items-center gap-1">
+                    <Eye className="w-3 h-3" />{s.reviews || 0}
                   </span>
                   <span className="text-yellow-400 flex items-center gap-1">
-                    <MessageSquare className="w-3 h-3" />{s.comments}
+                    <MessageSquare className="w-3 h-3" />{s.comments || 0}
+                  </span>
+                  <span className="text-frost-300/50 flex items-center gap-1">
+                    <Folder className="w-3 h-3" />{s.reposActive || 0}
                   </span>
                 </div>
               </div>
               
               {/* Score */}
-              <div className="text-right flex-shrink-0">
+              <div className="text-right flex-shrink-0 ml-2">
                 <div className="flex items-center gap-1.5 justify-end">
                   <MetricIcon className="w-4 h-4 text-frost-300/40" />
                   <span className="text-2xl font-bold text-frost-100">{value.toLocaleString()}</span>
                 </div>
-                <p className="text-xs text-frost-300/50">{s.reposActive} repos</p>
               </div>
             </div>
           )
@@ -279,7 +269,7 @@ export function Leaderboard({
         {sorted.length === 0 && (
           <div className="text-center py-12 text-frost-300/50">
             <Trophy className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p>No data available for this period</p>
+            <p>No data available</p>
           </div>
         )}
       </div>
@@ -288,4 +278,3 @@ export function Leaderboard({
 }
 
 export default Leaderboard
-

@@ -1,12 +1,13 @@
 /**
  * Team Members Section Component
  * Shows all activities by team members (anywhere in org)
+ * With repo filtering support
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { Loader2, UserCheck, Activity, Clock } from 'lucide-react'
-import { isSameDay, subHours } from 'date-fns'
-import { fetchUserEvents, calculateStatsFromActivities, ACTIVITY_TYPES } from '../../api/github/activities'
+import { Loader2, UserCheck, Activity, Folder, X, ChevronDown, Search } from 'lucide-react'
+import { isSameDay } from 'date-fns'
+import { fetchUserEvents, ACTIVITY_TYPES } from '../../api/github/activities'
 import { ActivityCard } from './ActivityCard'
 import { Leaderboard } from './Leaderboard'
 import { Heatmap } from './Heatmap'
@@ -22,14 +23,126 @@ const TYPE_FILTERS = [
   { key: 'comments', label: 'Comments', types: [ACTIVITY_TYPES.PR_COMMENT, ACTIVITY_TYPES.ISSUE_COMMENT, ACTIVITY_TYPES.COMMIT_COMMENT] },
 ]
 
-export function TeamMembersSection({ token, org, members, onMemberClick }) {
+// ============ REPO FILTER COMPONENT ============
+function RepoFilter({ repos, selectedRepos, onSelectionChange }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  
+  const filteredRepos = repos.filter(r => 
+    r.toLowerCase().includes(search.toLowerCase())
+  )
+  
+  const handleToggle = (repo) => {
+    if (selectedRepos.includes(repo)) {
+      onSelectionChange(selectedRepos.filter(r => r !== repo))
+    } else {
+      onSelectionChange([...selectedRepos, repo])
+    }
+  }
+  
+  return (
+    <div className="relative">
+      <button 
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
+          selectedRepos.length > 0 
+            ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400' 
+            : 'bg-void-700/50 border-void-600/50 text-frost-300/60 hover:text-frost-200'
+        }`}
+      >
+        <Folder className="w-4 h-4" />
+        <span className="text-sm font-medium">
+          {selectedRepos.length > 0 ? `${selectedRepos.length} Repos` : 'Filter by Repo'}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {open && (
+        <div className="absolute top-full left-0 mt-2 w-80 bg-void-800 border border-void-600/50 rounded-xl shadow-2xl z-50 overflow-hidden">
+          {/* Search */}
+          <div className="p-3 border-b border-void-600/30">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-frost-300/40" />
+              <input
+                type="text"
+                placeholder="Search repos..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-void-700/50 border border-void-600/50 rounded-lg text-frost-200 text-sm placeholder:text-frost-300/40 focus:outline-none focus:border-yellow-400/30"
+              />
+            </div>
+          </div>
+          
+          {/* Actions */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-void-600/30 bg-void-700/30">
+            <button 
+              onClick={() => onSelectionChange(filteredRepos)}
+              className="text-xs text-electric-400 hover:text-electric-500"
+            >
+              Select all
+            </button>
+            <button 
+              onClick={() => onSelectionChange([])}
+              className="text-xs text-frost-300/60 hover:text-frost-200"
+            >
+              Clear
+            </button>
+          </div>
+          
+          {/* Repo List */}
+          <div className="max-h-64 overflow-y-auto p-2">
+            {filteredRepos.map(repo => (
+              <label 
+                key={repo}
+                className="flex items-center gap-3 px-3 py-2 hover:bg-void-700/50 rounded-lg cursor-pointer transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedRepos.includes(repo)}
+                  onChange={() => handleToggle(repo)}
+                  className="accent-yellow-400"
+                />
+                <span className="text-sm text-frost-200 truncate">{repo}</span>
+              </label>
+            ))}
+            {filteredRepos.length === 0 && (
+              <p className="text-center py-4 text-frost-300/50 text-sm">No repos found</p>
+            )}
+          </div>
+          
+          {/* Close */}
+          <div className="p-2 border-t border-void-600/30">
+            <button 
+              onClick={() => setOpen(false)}
+              className="w-full py-2 bg-void-700/50 hover:bg-void-700 rounded-lg text-frost-300/60 text-sm transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function TeamMembersSection({ token, org, members, repos = [], onMemberClick }) {
   const [activities, setActivities] = useState([])
   const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [typeFilter, setTypeFilter] = useState('all')
+  const [selectedRepos, setSelectedRepos] = useState([])
   const toast = useToast()
+  
+  // Get unique repos from activities
+  const availableRepos = useMemo(() => {
+    const repoSet = new Set()
+    activities.forEach(a => {
+      if (a.repo) repoSet.add(a.repo)
+    })
+    return Array.from(repoSet).sort()
+  }, [activities])
   
   useEffect(() => {
     const load = async () => {
@@ -124,9 +237,14 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
     load()
   }, [token, org, members])
   
-  // Apply filters
+  // Apply filters including repo filter
   const filteredActivities = useMemo(() => {
     let filtered = activities
+    
+    // Repo filter
+    if (selectedRepos.length > 0) {
+      filtered = filtered.filter(a => selectedRepos.includes(a.repo))
+    }
     
     // Date filter
     if (selectedDate) {
@@ -142,7 +260,51 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
     }
     
     return filtered
-  }, [activities, selectedDate, typeFilter])
+  }, [activities, selectedDate, typeFilter, selectedRepos])
+  
+  // Recalculate stats for filtered activities
+  const filteredStats = useMemo(() => {
+    if (selectedRepos.length === 0) return stats
+    
+    // Recalculate stats based on filtered repos
+    const memberStatsMap = {}
+    stats.forEach(s => {
+      memberStatsMap[s.login] = {
+        ...s,
+        commits: 0,
+        prs: 0,
+        merges: 0,
+        reviews: 0,
+        comments: 0,
+        reposActive: new Set(),
+      }
+    })
+    
+    filteredActivities.forEach(act => {
+      if (!memberStatsMap[act.author]) return
+      
+      const s = memberStatsMap[act.author]
+      if (act.repo) s.reposActive.add(act.repo)
+      
+      if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+        s.commits += act.commitCount || 1
+      } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+        s.prs++
+      } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+        s.merges++
+      } else if (act.type?.includes('review')) {
+        s.reviews++
+      } else if (act.type?.includes('comment')) {
+        s.comments++
+      }
+    })
+    
+    return Object.values(memberStatsMap).map(s => ({
+      ...s,
+      reposActive: s.reposActive.size,
+      total: s.commits + s.prs + s.merges + s.reviews + s.comments,
+    })).sort((a, b) => b.total - a.total)
+  }, [stats, filteredActivities, selectedRepos])
   
   if (loading) {
     return (
@@ -173,9 +335,38 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
         <span className="text-frost-300/50 text-sm">• {activities.length} total activities</span>
       </div>
       
-      {/* Type Filters */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-frost-300/60 text-sm">Filter:</span>
+      {/* Filters Row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Repo Filter */}
+        <RepoFilter 
+          repos={availableRepos}
+          selectedRepos={selectedRepos}
+          onSelectionChange={setSelectedRepos}
+        />
+        
+        {/* Selected Repos Pills */}
+        {selectedRepos.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedRepos.slice(0, 3).map(repo => (
+              <span 
+                key={repo}
+                className="flex items-center gap-1.5 px-2 py-1 bg-yellow-400/15 text-yellow-400 rounded-lg text-xs"
+              >
+                {repo}
+                <button onClick={() => setSelectedRepos(selectedRepos.filter(r => r !== repo))}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            {selectedRepos.length > 3 && (
+              <span className="text-xs text-frost-300/50">+{selectedRepos.length - 3} more</span>
+            )}
+          </div>
+        )}
+        
+        <div className="h-6 w-px bg-void-600/50" />
+        
+        {/* Type Filters */}
         <div className="flex items-center gap-1 p-1 bg-void-700/30 rounded-xl border border-void-600/50">
           {TYPE_FILTERS.map(t => (
             <button 
@@ -194,14 +385,14 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
       </div>
       
       {/* Stats */}
-      <StatsCards stats={stats} type="member" />
+      <StatsCards stats={filteredStats} type="member" />
       
       {/* Heatmap */}
       <Heatmap 
-        activities={activities} 
+        activities={filteredActivities} 
         selectedDate={selectedDate} 
         onDateSelect={setSelectedDate}
-        months={2}
+        months={3}
       />
       
       {/* Main Content */}
@@ -238,8 +429,8 @@ export function TeamMembersSection({ token, org, members, onMemberClick }) {
         
         {/* Leaderboard */}
         <Leaderboard 
-          stats={stats} 
-          activities={activities} 
+          stats={filteredStats} 
+          activities={filteredActivities} 
           title="Member Rankings"
           onMemberClick={onMemberClick}
           showFilters={false}
