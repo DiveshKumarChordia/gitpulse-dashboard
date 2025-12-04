@@ -335,17 +335,33 @@ function parseGitHubEvent(event, org, repoName) {
   
   switch (event.type) {
     case 'PushEvent':
+      const pushBranch = payload.ref?.replace('refs/heads/', '')
+      const pushCommits = payload.commits || []
+      const firstCommit = pushCommits[0]
+      // Build proper message: show first commit message or fallback
+      const pushMessage = firstCommit?.message?.split('\n')[0] || 
+        (pushCommits.length > 0 ? `${pushCommits.length} commit${pushCommits.length > 1 ? 's' : ''} to ${pushBranch}` : `Push to ${pushBranch}`)
+      // Build proper URL: link to first commit or compare view
+      const pushUrl = pushCommits.length === 1 && firstCommit?.sha
+        ? `https://github.com/${org}/${repoName}/commit/${firstCommit.sha}`
+        : pushCommits.length > 1 && payload.before && payload.head
+          ? `https://github.com/${org}/${repoName}/compare/${payload.before?.substring(0, 7)}...${payload.head?.substring(0, 7)}`
+          : `https://github.com/${org}/${repoName}/tree/${pushBranch}`
+      
       return {
         ...base,
         type: ACTIVITY_TYPES.PUSH,
-        message: `Pushed ${payload.commits?.length || 0} commit(s) to ${payload.ref?.replace('refs/heads/', '')}`,
-        branch: payload.ref?.replace('refs/heads/', ''),
-        commits: payload.commits?.map(c => ({
+        message: pushMessage,
+        fullMessage: pushCommits.length > 1 ? `${pushCommits.length} commits to ${pushBranch}` : null,
+        branch: pushBranch,
+        url: pushUrl,
+        shortSha: firstCommit?.sha?.substring(0, 7),
+        commits: pushCommits.map(c => ({
           sha: c.sha,
           message: c.message,
-          url: c.url,
+          url: `https://github.com/${org}/${repoName}/commit/${c.sha}`,
         })),
-        commitCount: payload.commits?.length || 0,
+        commitCount: pushCommits.length,
       }
       
     case 'PullRequestEvent':
@@ -434,13 +450,15 @@ function parseGitHubEvent(event, org, repoName) {
           type: ACTIVITY_TYPES.BRANCH_CREATED,
           message: `Created branch: ${payload.ref}`,
           branch: payload.ref,
+          url: `https://github.com/${org}/${repoName}/tree/${payload.ref}`,
         }
       } else if (payload.ref_type === 'tag') {
         return {
           ...base,
           type: ACTIVITY_TYPES.TAG_CREATED,
           message: `Created tag: ${payload.ref}`,
-          tag: payload.ref,
+          tagName: payload.ref,
+          url: `https://github.com/${org}/${repoName}/releases/tag/${payload.ref}`,
         }
       }
       return null
@@ -452,13 +470,15 @@ function parseGitHubEvent(event, org, repoName) {
           type: ACTIVITY_TYPES.BRANCH_DELETED,
           message: `Deleted branch: ${payload.ref}`,
           branch: payload.ref,
+          url: `https://github.com/${org}/${repoName}/branches`,
         }
       } else if (payload.ref_type === 'tag') {
         return {
           ...base,
           type: ACTIVITY_TYPES.TAG_DELETED,
           message: `Deleted tag: ${payload.ref}`,
-          tag: payload.ref,
+          tagName: payload.ref,
+          url: `https://github.com/${org}/${repoName}/tags`,
         }
       }
       return null
