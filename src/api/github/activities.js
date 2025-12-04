@@ -391,10 +391,12 @@ export async function fetchTeamRepoActivitiesLast24Hours(token, org, repos, onPr
 
 // ============ PARSE GITHUB EVENT ============
 function parseGitHubEvent(event, org, repoName) {
+  const fullRepoName = `${org}/${repoName}`
   const base = {
-    id: `${repoName}-${event.id}`,
-    repo: repoName,
-    repoFullName: `${org}/${repoName}`,
+    id: `${fullRepoName}-${event.id}`,
+    repo: fullRepoName,  // Use FULL name for consistency (org/repo)
+    repoShort: repoName,
+    org: org,
     date: event.created_at,
     author: event.actor?.login,
     avatarUrl: event.actor?.avatar_url,

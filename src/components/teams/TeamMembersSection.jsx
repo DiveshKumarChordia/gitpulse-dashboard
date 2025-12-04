@@ -234,30 +234,10 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
   const [dateRange, setDateRange] = useState({ start: null, end: null })
   const toast = useToast()
   
-  // Get org repo names for filtering - BOTH full name and short name
-  const orgRepoInfo = useMemo(() => {
-    const fullNames = new Set()
-    const shortNames = new Set()
-    repos.forEach(r => {
-      fullNames.add(r.full_name || `${org}/${r.name}`)
-      shortNames.add(r.name)
-    })
-    return { fullNames, shortNames, org }
-  }, [repos, org])
-  
-  // Check if repo belongs to org
+  // Check if repo belongs to org - simple org prefix check
   const isOrgRepo = (repoName) => {
     if (!repoName) return false
-    // Check full name match
-    if (orgRepoInfo.fullNames.has(repoName)) return true
-    // Check short name match
-    if (orgRepoInfo.shortNames.has(repoName)) return true
-    // Check if starts with org/
-    if (repoName.startsWith(`${org}/`)) {
-      const shortName = repoName.split('/')[1]
-      if (orgRepoInfo.shortNames.has(shortName)) return true
-    }
-    // Check if org prefix matches
+    // repo is now full name like "org/repo-name"
     if (repoName.includes('/')) {
       const [repoOrg] = repoName.split('/')
       return repoOrg.toLowerCase() === org.toLowerCase()
