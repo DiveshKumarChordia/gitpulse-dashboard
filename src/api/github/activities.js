@@ -767,147 +767,141 @@ export async function fetchUserActivitiesInOrg(token, org, username, repos) {
   return activities
 }
 
-// ============ FETCH TEAM MEMBER ACTIVITIES FROM ORG REPOS ============
-// Scans ALL org repos for activities by team members (like main Activity page)
+// ============ FAST: FETCH TEAM MEMBER ACTIVITIES USING SEARCH API ============
+// Uses GitHub Search API - ONE query per member across entire org (FAST!)
 export async function fetchTeamMemberActivitiesFromOrgRepos(token, org, repos, memberLogins, onProgress) {
   const activities = []
-  const memberSet = new Set(memberLogins.map(m => m.toLowerCase()))
+  const totalMembers = memberLogins.length
   
-  const BATCH_SIZE = 5
+  // Process members in parallel batches
+  const BATCH_SIZE = 3 // Search API has stricter rate limits
   let completed = 0
-  const totalRepos = repos.length
   
-  for (let i = 0; i < repos.length; i += BATCH_SIZE) {
-    const batch = repos.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < memberLogins.length; i += BATCH_SIZE) {
+    const batch = memberLogins.slice(i, i + BATCH_SIZE)
     
     onProgress?.({
-      status: `Scanning ${batch.map(r => r.name || r).join(', ')}...`,
-      percentage: Math.round((i / totalRepos) * 100)
+      status: `Searching for ${batch.join(', ')}...`,
+      percentage: Math.round((i / totalMembers) * 100)
     })
     
     const batchResults = await Promise.allSettled(
-      batch.map(async (repo) => {
-        const repoName = typeof repo === 'string' ? repo : repo.name
-        const repoActivities = []
+      batch.map(async (username) => {
+        const memberActivities = []
         
-        // 1. Get repo events (has most activity types)
+        // 1. Search COMMITS by author (fast - searches entire org at once)
         try {
-          const events = await fetchWithAuth(
-            `${GITHUB_API_BASE}/repos/${org}/${repoName}/events?per_page=100`,
-            token
+          const commitResponse = await fetch(
+            `${GITHUB_API_BASE}/search/commits?q=author:${username}+org:${org}&sort=committer-date&order=desc&per_page=100`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github.cloak-preview+json',
+                'User-Agent': 'GitPulse-Dashboard',
+              },
+            }
           )
-          if (events) {
-            for (const event of events) {
-              const author = event.actor?.login?.toLowerCase()
-              if (author && memberSet.has(author)) {
-                const activity = parseGitHubEvent(event, org, repoName)
-                if (activity) repoActivities.push(activity)
-              }
+          if (commitResponse.ok) {
+            const data = await commitResponse.json()
+            for (const commit of (data.items || [])) {
+              memberActivities.push({
+                id: `${commit.repository.full_name}-commit-${commit.sha}`,
+                type: ACTIVITY_TYPES.COMMIT,
+                repo: commit.repository.full_name,
+                repoShort: commit.repository.name,
+                message: commit.commit?.message?.split('\n')[0] || 'No message',
+                fullMessage: commit.commit?.message,
+                date: commit.commit?.committer?.date || commit.commit?.author?.date,
+                sha: commit.sha,
+                shortSha: commit.sha?.substring(0, 7),
+                url: commit.html_url,
+                author: commit.author?.login || commit.commit?.author?.name || username,
+                avatarUrl: commit.author?.avatar_url,
+              })
             }
           }
-        } catch (e) { /* continue */ }
+        } catch (e) { console.warn(`Commit search failed for ${username}:`, e) }
         
-        // 2. Get recent commits (more reliable for commit data)
+        // 2. Search PRs by author (fast - searches entire org at once)
         try {
-          const commits = await fetchWithAuth(
-            `${GITHUB_API_BASE}/repos/${org}/${repoName}/commits?per_page=50`,
-            token
+          const prResponse = await fetch(
+            `${GITHUB_API_BASE}/search/issues?q=author:${username}+org:${org}+is:pr&sort=created&order=desc&per_page=100`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'GitPulse-Dashboard',
+              },
+            }
           )
-          if (commits) {
-            for (const commit of commits) {
-              const author = commit.author?.login?.toLowerCase() || commit.commit?.author?.name?.toLowerCase()
-              if (author && memberSet.has(author)) {
-                const exists = repoActivities.some(a => a.sha === commit.sha)
-                if (!exists) {
-                  repoActivities.push({
-                    id: `${org}/${repoName}-commit-${commit.sha}`,
-                    type: ACTIVITY_TYPES.COMMIT,
-                    repo: `${org}/${repoName}`,
-                    repoShort: repoName,
-                    message: commit.commit?.message?.split('\n')[0] || 'No message',
-                    fullMessage: commit.commit?.message,
-                    date: commit.commit?.author?.date || commit.commit?.committer?.date,
-                    sha: commit.sha,
-                    shortSha: commit.sha?.substring(0, 7),
-                    url: commit.html_url,
-                    author: commit.author?.login || commit.commit?.author?.name || 'unknown',
-                    avatarUrl: commit.author?.avatar_url,
-                    additions: commit.stats?.additions,
-                    deletions: commit.stats?.deletions,
-                    changedFiles: commit.files?.length,
-                  })
-                }
-              }
+          if (prResponse.ok) {
+            const data = await prResponse.json()
+            for (const pr of (data.items || [])) {
+              const repoFullName = pr.repository_url?.replace('https://api.github.com/repos/', '') || ''
+              const repoName = repoFullName.split('/')[1] || ''
+              
+              memberActivities.push({
+                id: `${repoFullName}-pr-${pr.id}`,
+                type: pr.pull_request?.merged_at ? ACTIVITY_TYPES.PR_MERGED : 
+                      pr.state === 'open' ? ACTIVITY_TYPES.PR_OPENED : ACTIVITY_TYPES.PR_CLOSED,
+                repo: repoFullName,
+                repoShort: repoName,
+                message: pr.title,
+                body: pr.body,
+                date: pr.created_at,
+                number: pr.number,
+                url: pr.html_url,
+                state: pr.pull_request?.merged_at ? 'merged' : pr.state,
+                author: pr.user?.login || username,
+                avatarUrl: pr.user?.avatar_url,
+                labels: pr.labels?.map(l => ({ name: l.name, color: l.color })),
+              })
             }
           }
-        } catch (e) { /* continue */ }
+        } catch (e) { console.warn(`PR search failed for ${username}:`, e) }
         
-        // 3. Get PRs (all states)
+        // 3. Search issue comments by author
         try {
-          const prs = await fetchWithAuth(
-            `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls?state=all&per_page=50`,
-            token
-          )
-          if (prs) {
-            for (const pr of prs) {
-              const author = pr.user?.login?.toLowerCase()
-              if (author && memberSet.has(author)) {
-                const exists = repoActivities.some(a => a.number === pr.number && a.type?.includes('pr'))
-                if (!exists) {
-                  repoActivities.push({
-                    id: `${org}/${repoName}-pr-${pr.id}`,
-                    type: pr.merged_at ? ACTIVITY_TYPES.PR_MERGED : pr.state === 'open' ? ACTIVITY_TYPES.PR_OPENED : ACTIVITY_TYPES.PR_CLOSED,
-                    repo: `${org}/${repoName}`,
-                    repoShort: repoName,
-                    message: pr.title,
-                    body: pr.body,
-                    date: pr.merged_at || pr.updated_at || pr.created_at,
-                    number: pr.number,
-                    url: pr.html_url,
-                    state: pr.merged_at ? 'merged' : pr.state,
-                    author: pr.user?.login || 'unknown',
-                    avatarUrl: pr.user?.avatar_url,
-                    additions: pr.additions,
-                    deletions: pr.deletions,
-                    changedFiles: pr.changed_files,
-                    labels: pr.labels?.map(l => ({ name: l.name, color: l.color })),
-                    branch: pr.head?.ref,
-                  })
-                }
-              }
+          const commentResponse = await fetch(
+            `${GITHUB_API_BASE}/search/issues?q=commenter:${username}+org:${org}+is:pr&sort=updated&order=desc&per_page=50`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'GitPulse-Dashboard',
+              },
             }
-          }
-        } catch (e) { /* continue */ }
-        
-        // 4. Get PR reviews/comments
-        try {
-          const prComments = await fetchWithAuth(
-            `${GITHUB_API_BASE}/repos/${org}/${repoName}/pulls/comments?per_page=50`,
-            token
           )
-          if (prComments) {
-            for (const comment of prComments) {
-              const author = comment.user?.login?.toLowerCase()
-              if (author && memberSet.has(author)) {
-                repoActivities.push({
-                  id: `${org}/${repoName}-prcomment-${comment.id}`,
+          if (commentResponse.ok) {
+            const data = await commentResponse.json()
+            for (const issue of (data.items || [])) {
+              const repoFullName = issue.repository_url?.replace('https://api.github.com/repos/', '') || ''
+              const repoName = repoFullName.split('/')[1] || ''
+              
+              // Only add if we don't already have this as a PR
+              const existsAsPR = memberActivities.some(a => a.number === issue.number && a.repo === repoFullName)
+              if (!existsAsPR) {
+                memberActivities.push({
+                  id: `${repoFullName}-comment-${issue.id}-${username}`,
                   type: ACTIVITY_TYPES.PR_COMMENT,
-                  repo: `${org}/${repoName}`,
+                  repo: repoFullName,
                   repoShort: repoName,
-                  message: `Commented on PR`,
-                  body: comment.body,
-                  date: comment.created_at,
-                  url: comment.html_url,
-                  author: comment.user?.login || 'unknown',
-                  avatarUrl: comment.user?.avatar_url,
-                  path: comment.path,
+                  message: `Commented on #${issue.number}: ${issue.title}`,
+                  date: issue.updated_at,
+                  number: issue.number,
+                  url: issue.html_url,
+                  author: username,
+                  avatarUrl: issue.user?.avatar_url,
                 })
               }
             }
           }
-        } catch (e) { /* continue */ }
+        } catch (e) { /* optional - continue */ }
         
-        return repoActivities
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 100))
+        
+        return memberActivities
       })
     )
     
@@ -919,8 +913,8 @@ export async function fetchTeamMemberActivitiesFromOrgRepos(token, org, repos, m
     
     completed += batch.length
     onProgress?.({
-      status: `Scanned ${completed}/${totalRepos} repos...`,
-      percentage: Math.round((completed / totalRepos) * 100)
+      status: `Loaded ${completed}/${totalMembers} members...`,
+      percentage: Math.round((completed / totalMembers) * 100)
     })
   }
   
