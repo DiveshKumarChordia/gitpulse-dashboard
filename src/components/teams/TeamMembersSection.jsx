@@ -10,7 +10,7 @@ import {
   Calendar, AlertCircle
 } from 'lucide-react'
 import { isSameDay, isAfter, isBefore, subMonths, format, startOfDay, endOfDay } from 'date-fns'
-import { fetchUserEvents, ACTIVITY_TYPES } from '../../api/github/activities'
+import { fetchTeamMemberActivitiesFromOrgRepos, ACTIVITY_TYPES } from '../../api/github/activities'
 import { ActivityFeed } from './ActivityFeed'
 import { Leaderboard } from './Leaderboard'
 import { Heatmap } from './Heatmap'
@@ -247,17 +247,27 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
   
   useEffect(() => {
     const load = async () => {
-      if (!members.length) {
+      if (!members.length || !repos.length) {
         setLoading(false)
         return
       }
       setLoading(true)
       
       try {
-        const allActs = []
-        const memberStatsMap = {}
+        // Get all member logins
+        const memberLogins = members.map(m => m.login)
         
-        // Initialize all members first
+        // Scan ALL org repos for team member activities
+        const allActivities = await fetchTeamMemberActivitiesFromOrgRepos(
+          token,
+          org,
+          repos,
+          memberLogins,
+          (p) => setProgress(p)
+        )
+        
+        // Calculate stats per member
+        const memberStatsMap = {}
         members.forEach(member => {
           memberStatsMap[member.login] = {
             login: member.login,
@@ -268,73 +278,27 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
           }
         })
         
-        // PARALLEL: Load all members at once (up to 5 concurrent for stability)
-        const BATCH_SIZE = 5
-        let completed = 0
-        
-        for (let i = 0; i < members.length; i += BATCH_SIZE) {
-          const batch = members.slice(i, i + BATCH_SIZE)
-          setProgress({
-            status: `Loading ${batch.map(m => m.login).join(', ')}...`,
-            percentage: Math.round((i / members.length) * 100)
-          })
-          
-          const results = await Promise.allSettled(
-            batch.map(async (member) => {
-              try {
-                const memberActivities = await fetchUserEvents(token, member.login)
-                return { member, activities: memberActivities || [] }
-              } catch (e) {
-                console.warn(`Failed to fetch activities for ${member.login}:`, e)
-                return { member, activities: [] }
-              }
-            })
-          )
-          
-          for (const result of results) {
-            if (result.status === 'fulfilled') {
-              const { member, activities: memberActivities } = result.value
-              completed++
-              
-              // Add ALL activities (no org filtering)
-              for (const act of memberActivities) {
-                allActs.push(act)
-                
-                const s = memberStatsMap[member.login]
-                if (s && act.repo) {
-                  s.reposActive.add(act.repo)
-                  
-                  if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
-                    s.commits += act.commitCount || 1
-                  } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
-                    s.prs++
-                  } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
-                    s.merges++
-                  } else if (act.type?.includes('review')) {
-                    s.reviews++
-                  } else if (act.type?.includes('comment')) {
-                    s.comments++
-                  }
-                }
-              }
+        for (const act of allActivities) {
+          const authorKey = act.author?.toLowerCase()
+          // Find matching member (case insensitive)
+          const memberLogin = memberLogins.find(m => m.toLowerCase() === authorKey)
+          if (memberLogin && memberStatsMap[memberLogin]) {
+            const s = memberStatsMap[memberLogin]
+            if (act.repo) s.reposActive.add(act.repo)
+            
+            if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+              s.commits += act.commitCount || 1
+            } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+              s.prs++
+            } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+              s.merges++
+            } else if (act.type?.includes('review')) {
+              s.reviews++
+            } else if (act.type?.includes('comment')) {
+              s.comments++
             }
           }
-          
-          setProgress({
-            status: `Loaded ${completed}/${members.length} members...`,
-            percentage: Math.round((completed / members.length) * 100)
-          })
         }
-        
-        // Sort and deduplicate
-        allActs.sort((a, b) => new Date(b.date) - new Date(a.date))
-        const seen = new Set()
-        const unique = allActs.filter(a => {
-          const key = a.id || `${a.type}-${a.repo}-${a.date}-${a.author}`
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
         
         // Calculate final stats
         const finalStats = Object.values(memberStatsMap).map(s => ({
@@ -343,13 +307,13 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
           total: (s.commits || 0) + (s.prs || 0) + (s.merges || 0) + (s.reviews || 0) + (s.comments || 0),
         })).sort((a, b) => b.total - a.total)
         
-        setActivities(unique)
+        setActivities(allActivities)
         setStats(finalStats)
         
-        if (unique.length > 0) {
-          toast.success(`Loaded ${unique.length} activities from ${members.length} members`)
+        if (allActivities.length > 0) {
+          toast.success(`Found ${allActivities.length} activities across ${repos.length} repos`)
         } else {
-          toast.warning(`No activities found (checked ${members.length} members)`)
+          toast.warning(`No activities found in ${repos.length} repos`)
         }
       } catch (e) {
         console.error('TeamMembersSection error:', e)
@@ -361,7 +325,7 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
     }
     
     load()
-  }, [token, org, members])
+  }, [token, org, members, repos])
   
   // Apply all filters
   const filteredActivities = useMemo(() => {
@@ -458,8 +422,10 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
       {/* Info Header */}
       <div className="flex items-center gap-3 p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
         <UserCheck className="w-5 h-5 text-purple-400" />
-        <span className="text-purple-400 font-medium">All activities from {members.length} team members</span>
-        <span className="text-frost-300/50 text-sm">• {activities.length} activities</span>
+        <span className="text-purple-400 font-medium">
+          Scanned {repos.length} repos for {members.length} members
+        </span>
+        <span className="text-frost-300/50 text-sm">• {activities.length} activities found</span>
       </div>
       
       {/* Filters Row */}
