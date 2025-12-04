@@ -1,13 +1,13 @@
 /**
  * Enhanced Activity Feed Component
- * Simplified cards - commits inline, PRs link properly
+ * Beautiful design with commit details shown by default
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { 
   GitCommit, GitPullRequest, GitMerge, MessageSquare, Eye, ExternalLink,
   CheckCircle, XCircle, AlertCircle, GitBranch, Tag, Rocket, Clock,
-  MessageCircle, Trash2, Upload, GitFork, Activity, Loader2,
+  MessageCircle, Trash2, Upload, Activity, Loader2,
   Maximize2, Minimize2, ChevronDown, ChevronUp, Search, Plus, Minus, 
   Code2, FolderOpen, Hash, Layers
 } from 'lucide-react'
@@ -18,117 +18,132 @@ import { ACTIVITY_TYPES, fetchCommitDetails } from '../../api/github/activities'
 const ACTIVITY_STYLES = {
   [ACTIVITY_TYPES.COMMIT]: {
     border: 'border-l-emerald-500',
-    bg: 'bg-emerald-500/10',
+    headerBg: 'bg-gradient-to-r from-emerald-500/20 to-emerald-500/5',
     iconBg: 'bg-emerald-500/20',
     iconColor: 'text-emerald-400',
+    badge: 'bg-emerald-500/20 text-emerald-400',
   },
   [ACTIVITY_TYPES.PUSH]: {
     border: 'border-l-green-500',
-    bg: 'bg-green-500/10',
+    headerBg: 'bg-gradient-to-r from-green-500/20 to-green-500/5',
     iconBg: 'bg-green-500/20',
     iconColor: 'text-green-400',
+    badge: 'bg-green-500/20 text-green-400',
   },
   [ACTIVITY_TYPES.PR_OPENED]: {
     border: 'border-l-purple-500',
-    bg: 'bg-purple-500/10',
+    headerBg: 'bg-gradient-to-r from-purple-500/20 to-purple-500/5',
     iconBg: 'bg-purple-500/20',
     iconColor: 'text-purple-400',
+    badge: 'bg-purple-500/20 text-purple-400',
   },
   [ACTIVITY_TYPES.PR_MERGED]: {
     border: 'border-l-fuchsia-500',
-    bg: 'bg-fuchsia-500/10',
+    headerBg: 'bg-gradient-to-r from-fuchsia-500/20 to-fuchsia-500/5',
     iconBg: 'bg-fuchsia-500/20',
     iconColor: 'text-fuchsia-400',
+    badge: 'bg-fuchsia-500/20 text-fuchsia-400',
   },
   [ACTIVITY_TYPES.PR_CLOSED]: {
     border: 'border-l-gray-500',
-    bg: 'bg-gray-500/10',
+    headerBg: 'bg-gradient-to-r from-gray-500/20 to-gray-500/5',
     iconBg: 'bg-gray-500/20',
     iconColor: 'text-gray-400',
+    badge: 'bg-gray-500/20 text-gray-400',
   },
   [ACTIVITY_TYPES.REVIEW_APPROVED]: {
     border: 'border-l-teal-400',
-    bg: 'bg-teal-500/10',
+    headerBg: 'bg-gradient-to-r from-teal-500/20 to-teal-500/5',
     iconBg: 'bg-teal-500/20',
     iconColor: 'text-teal-400',
+    badge: 'bg-teal-500/20 text-teal-400',
   },
   [ACTIVITY_TYPES.REVIEW_CHANGES_REQUESTED]: {
     border: 'border-l-orange-500',
-    bg: 'bg-orange-500/10',
+    headerBg: 'bg-gradient-to-r from-orange-500/20 to-orange-500/5',
     iconBg: 'bg-orange-500/20',
     iconColor: 'text-orange-400',
+    badge: 'bg-orange-500/20 text-orange-400',
   },
   [ACTIVITY_TYPES.REVIEW_COMMENTED]: {
     border: 'border-l-cyan-400',
-    bg: 'bg-cyan-500/10',
+    headerBg: 'bg-gradient-to-r from-cyan-500/20 to-cyan-500/5',
     iconBg: 'bg-cyan-500/20',
     iconColor: 'text-cyan-400',
+    badge: 'bg-cyan-500/20 text-cyan-400',
   },
   [ACTIVITY_TYPES.PR_COMMENT]: {
     border: 'border-l-blue-400',
-    bg: 'bg-blue-500/10',
+    headerBg: 'bg-gradient-to-r from-blue-500/20 to-blue-500/5',
     iconBg: 'bg-blue-500/20',
     iconColor: 'text-blue-400',
+    badge: 'bg-blue-500/20 text-blue-400',
   },
   [ACTIVITY_TYPES.ISSUE_COMMENT]: {
     border: 'border-l-indigo-400',
-    bg: 'bg-indigo-500/10',
+    headerBg: 'bg-gradient-to-r from-indigo-500/20 to-indigo-500/5',
     iconBg: 'bg-indigo-500/20',
     iconColor: 'text-indigo-400',
+    badge: 'bg-indigo-500/20 text-indigo-400',
   },
   [ACTIVITY_TYPES.BRANCH_CREATED]: {
     border: 'border-l-teal-500',
-    bg: 'bg-teal-500/10',
+    headerBg: 'bg-gradient-to-r from-teal-500/20 to-teal-500/5',
     iconBg: 'bg-teal-500/20',
     iconColor: 'text-teal-400',
+    badge: 'bg-teal-500/20 text-teal-400',
   },
   [ACTIVITY_TYPES.BRANCH_DELETED]: {
     border: 'border-l-red-400',
-    bg: 'bg-red-500/10',
+    headerBg: 'bg-gradient-to-r from-red-500/20 to-red-500/5',
     iconBg: 'bg-red-500/20',
     iconColor: 'text-red-400',
+    badge: 'bg-red-500/20 text-red-400',
   },
   [ACTIVITY_TYPES.TAG_CREATED]: {
     border: 'border-l-amber-500',
-    bg: 'bg-amber-500/10',
+    headerBg: 'bg-gradient-to-r from-amber-500/20 to-amber-500/5',
     iconBg: 'bg-amber-500/20',
     iconColor: 'text-amber-400',
+    badge: 'bg-amber-500/20 text-amber-400',
   },
   [ACTIVITY_TYPES.RELEASE_PUBLISHED]: {
     border: 'border-l-yellow-500',
-    bg: 'bg-yellow-500/10',
+    headerBg: 'bg-gradient-to-r from-yellow-500/20 to-yellow-500/5',
     iconBg: 'bg-yellow-500/20',
     iconColor: 'text-yellow-400',
+    badge: 'bg-yellow-500/20 text-yellow-400',
   },
 }
 
 const DEFAULT_STYLE = {
   border: 'border-l-electric-400',
-  bg: 'bg-electric-400/10',
+  headerBg: 'bg-gradient-to-r from-electric-400/20 to-electric-400/5',
   iconBg: 'bg-electric-400/20',
   iconColor: 'text-electric-400',
+  badge: 'bg-electric-400/20 text-electric-400',
 }
 
 const ACTIVITY_LABELS = {
-  [ACTIVITY_TYPES.COMMIT]: 'Commit',
-  [ACTIVITY_TYPES.PUSH]: 'Push',
-  [ACTIVITY_TYPES.PR_OPENED]: 'PR Opened',
-  [ACTIVITY_TYPES.PR_MERGED]: 'PR Merged',
-  [ACTIVITY_TYPES.PR_CLOSED]: 'PR Closed',
-  [ACTIVITY_TYPES.REVIEW_APPROVED]: 'Approved',
-  [ACTIVITY_TYPES.REVIEW_CHANGES_REQUESTED]: 'Changes Requested',
-  [ACTIVITY_TYPES.REVIEW_COMMENTED]: 'Review',
-  [ACTIVITY_TYPES.PR_COMMENT]: 'Comment',
-  [ACTIVITY_TYPES.ISSUE_COMMENT]: 'Comment',
-  [ACTIVITY_TYPES.BRANCH_CREATED]: 'Branch',
-  [ACTIVITY_TYPES.BRANCH_DELETED]: 'Deleted',
-  [ACTIVITY_TYPES.TAG_CREATED]: 'Tag',
-  [ACTIVITY_TYPES.RELEASE_PUBLISHED]: 'Release',
+  [ACTIVITY_TYPES.COMMIT]: 'COMMIT',
+  [ACTIVITY_TYPES.PUSH]: 'PUSH',
+  [ACTIVITY_TYPES.PR_OPENED]: 'PR OPENED',
+  [ACTIVITY_TYPES.PR_MERGED]: 'MERGED',
+  [ACTIVITY_TYPES.PR_CLOSED]: 'CLOSED',
+  [ACTIVITY_TYPES.REVIEW_APPROVED]: 'APPROVED',
+  [ACTIVITY_TYPES.REVIEW_CHANGES_REQUESTED]: 'CHANGES',
+  [ACTIVITY_TYPES.REVIEW_COMMENTED]: 'REVIEW',
+  [ACTIVITY_TYPES.PR_COMMENT]: 'COMMENT',
+  [ACTIVITY_TYPES.ISSUE_COMMENT]: 'COMMENT',
+  [ACTIVITY_TYPES.BRANCH_CREATED]: 'BRANCH',
+  [ACTIVITY_TYPES.BRANCH_DELETED]: 'DELETED',
+  [ACTIVITY_TYPES.TAG_CREATED]: 'TAG',
+  [ACTIVITY_TYPES.RELEASE_PUBLISHED]: 'RELEASE',
 }
 
 const ICONS = {
   [ACTIVITY_TYPES.COMMIT]: GitCommit,
-  [ACTIVITY_TYPES.PUSH]: GitCommit, // Show commit icon for push
+  [ACTIVITY_TYPES.PUSH]: Upload,
   [ACTIVITY_TYPES.PR_OPENED]: GitPullRequest,
   [ACTIVITY_TYPES.PR_MERGED]: GitMerge,
   [ACTIVITY_TYPES.PR_CLOSED]: XCircle,
@@ -143,189 +158,217 @@ const ICONS = {
   [ACTIVITY_TYPES.RELEASE_PUBLISHED]: Rocket,
 }
 
-// ============ SIMPLIFIED ACTIVITY CARD ============
+// ============ ACTIVITY CARD ============
 function ActivityCard({ activity, onMemberClick, token }) {
-  const [showMoreCommits, setShowMoreCommits] = useState(false)
-  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [showCommits, setShowCommits] = useState(false)
   const [commitDetails, setCommitDetails] = useState(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
   
   const style = ACTIVITY_STYLES[activity.type] || DEFAULT_STYLE
   const Icon = ICONS[activity.type] || Activity
-  const label = ACTIVITY_LABELS[activity.type] || 'Activity'
+  const label = ACTIVITY_LABELS[activity.type] || 'ACTIVITY'
   
   const isPush = activity.type === ACTIVITY_TYPES.PUSH
   const isPR = [ACTIVITY_TYPES.PR_OPENED, ACTIVITY_TYPES.PR_MERGED, ACTIVITY_TYPES.PR_CLOSED].includes(activity.type)
   const commits = activity.commits || []
-  const hasMultipleCommits = commits.length > 1 || (activity.commitCount && activity.commitCount > 1)
+  const hasMultipleCommits = commits.length > 1
   
-  // For single commit push, show commit directly
-  const singleCommit = isPush && commits.length === 1 ? commits[0] : null
-  const displaySha = singleCommit?.sha || activity.sha || activity.shortSha
+  const displaySha = commits[0]?.sha || activity.sha
   
-  // Get the URL to link to
+  // Auto-load commit details when card mounts (for push events without line info)
+  useEffect(() => {
+    const shouldFetch = isPush && displaySha && token && 
+      activity.additions === undefined && activity.deletions === undefined
+    
+    if (shouldFetch && !commitDetails && !loadingDetails) {
+      setLoadingDetails(true)
+      const [repoOrg, repoName] = activity.repo?.split('/') || []
+      if (repoOrg && repoName) {
+        fetchCommitDetails(token, repoOrg, repoName, displaySha)
+          .then(details => {
+            if (details) setCommitDetails(details)
+          })
+          .catch(() => {})
+          .finally(() => setLoadingDetails(false))
+      } else {
+        setLoadingDetails(false)
+      }
+    }
+  }, [activity, displaySha, token, isPush, commitDetails, loadingDetails])
+  
+  // Get URL
   const getUrl = () => {
-    // PR - link to the PR page
     if (isPR && activity.url) return activity.url
     if (isPR && activity.number) return `https://github.com/${activity.repo}/pull/${activity.number}`
-    
-    // Push/Commit - link to the commit
-    if (isPush && singleCommit?.sha) return `https://github.com/${activity.repo}/commit/${singleCommit.sha}`
-    if (isPush && activity.sha) return `https://github.com/${activity.repo}/commit/${activity.sha}`
-    
-    // Default
+    if (displaySha) return `https://github.com/${activity.repo}/commit/${displaySha}`
     if (activity.url) return activity.url
     return `https://github.com/${activity.repo}`
   }
   
-  // Get the commit message to display
+  // Get message
   const getMessage = () => {
-    if (isPush && singleCommit?.message) return singleCommit.message.split('\n')[0]
     if (isPush && commits[0]?.message) return commits[0].message.split('\n')[0]
     return activity.message
   }
   
-  // Load commit details on demand
-  const loadCommitDetails = async () => {
-    if (!token || !displaySha || commitDetails) return
-    setLoadingDetails(true)
-    try {
-      const [repoOrg, repoName] = activity.repo?.split('/') || []
-      if (repoOrg && repoName) {
-        const details = await fetchCommitDetails(token, repoOrg, repoName, displaySha)
-        if (details) setCommitDetails(details)
-      }
-    } catch (e) {
-      console.warn('Failed to load commit details:', e)
-    }
-    setLoadingDetails(false)
-  }
-  
+  // Use commit details or activity data
   const additions = commitDetails?.additions ?? activity.additions
   const deletions = commitDetails?.deletions ?? activity.deletions
-  const files = commitDetails?.changedFiles ?? activity.changedFiles
+  const changedFiles = commitDetails?.changedFiles ?? activity.changedFiles
   
   return (
-    <a 
-      href={getUrl()}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`block group rounded-2xl overflow-hidden border-l-4 ${style.border} bg-void-800/70 hover:bg-void-800 transition-all duration-200`}
-    >
+    <div className={`group relative rounded-2xl overflow-hidden border-l-4 ${style.border} bg-void-800/80 hover:bg-void-800 transition-all duration-300 shadow-lg hover:shadow-xl`}>
       {/* Header */}
-      <div className={`${style.bg} px-4 py-3 border-b border-void-600/30`}>
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className={`${style.headerBg} px-5 py-4 border-b border-void-600/30`}>
+        <div className="flex items-center gap-3 flex-wrap">
           {/* Icon */}
-          <div className={`p-2 ${style.iconBg} rounded-lg`}>
-            <Icon className={`w-4 h-4 ${style.iconColor}`} />
+          <div className={`p-2.5 ${style.iconBg} rounded-xl shadow-lg`}>
+            <Icon className={`w-5 h-5 ${style.iconColor}`} />
           </div>
           
           {/* Author */}
           <button 
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMemberClick?.(activity.author) }}
-            className="flex items-center gap-2 hover:opacity-80"
+            onClick={() => onMemberClick?.(activity.author)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            {activity.avatarUrl && <img src={activity.avatarUrl} alt="" className="w-6 h-6 rounded-full" />}
-            <span className="font-semibold text-frost-100 text-sm">{activity.author}</span>
+            {activity.avatarUrl && (
+              <img src={activity.avatarUrl} alt="" className="w-7 h-7 rounded-full ring-2 ring-void-600" />
+            )}
+            <span className="font-bold text-frost-100">{activity.author}</span>
           </button>
           
-          <span className="text-frost-300/30">→</span>
+          <span className="text-frost-300/40">→</span>
           
           {/* Repo */}
-          <span className="px-2 py-1 bg-yellow-400/15 text-yellow-400 rounded-lg text-xs font-medium">
+          <a 
+            href={`https://github.com/${activity.repo}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 bg-yellow-400/15 text-yellow-400 rounded-lg text-sm font-semibold hover:bg-yellow-400/25 transition-colors"
+          >
             {activity.repoShort || activity.repo?.split('/')[1] || activity.repo}
-          </span>
+          </a>
           
           {/* Type Badge */}
-          <span className={`px-2 py-1 ${style.iconBg} ${style.iconColor} rounded-lg text-xs font-bold`}>
+          <span className={`px-3 py-1.5 ${style.badge} rounded-lg text-xs font-bold uppercase tracking-wide`}>
             {label}
           </span>
           
           {/* PR Number */}
-          {activity.number && <span className="text-sm text-frost-300/60">#{activity.number}</span>}
+          {activity.number && (
+            <span className="text-sm font-mono text-frost-300/60">#{activity.number}</span>
+          )}
           
-          {/* Status */}
+          {/* Merged Badge */}
           {activity.state === 'merged' && (
-            <span className="px-2 py-0.5 bg-fuchsia-500/25 text-fuchsia-400 rounded text-xs font-bold">MERGED</span>
+            <span className="px-2.5 py-1 bg-fuchsia-500/25 text-fuchsia-400 border border-fuchsia-500/30 rounded-lg text-xs font-bold">
+              MERGED
+            </span>
           )}
           
           {/* Time */}
-          <span className="ml-auto text-xs text-frost-300/40 flex items-center gap-1">
-            <Clock className="w-3 h-3" />
+          <span className="ml-auto text-xs text-frost-300/50 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" />
             {formatDistanceToNow(new Date(activity.date), { addSuffix: true })}
           </span>
           
-          <ExternalLink className="w-3.5 h-3.5 text-frost-300/30 group-hover:text-frost-200" />
+          {/* Link Icon */}
+          <a 
+            href={getUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 hover:bg-void-600/50 rounded-lg transition-colors"
+          >
+            <ExternalLink className="w-4 h-4 text-frost-300/40 group-hover:text-frost-200" />
+          </a>
         </div>
       </div>
       
       {/* Content */}
-      <div className="p-4">
+      <a href={getUrl()} target="_blank" rel="noopener noreferrer" className="block p-5">
         {/* Message */}
-        <p className="text-frost-100 font-medium mb-3 group-hover:text-white">
+        <p className="text-frost-100 text-base font-medium leading-relaxed mb-4 group-hover:text-white transition-colors">
           {getMessage()}
         </p>
         
-        {/* Commit Info (for push/commit) */}
-        {(isPush || activity.type === ACTIVITY_TYPES.COMMIT) && displaySha && (
-          <div className="flex items-center gap-3 flex-wrap mb-3">
-            {/* SHA */}
-            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-              <Hash className="w-3.5 h-3.5 text-emerald-400" />
-              <code className="text-sm font-mono text-emerald-400">{displaySha.substring(0, 7)}</code>
-            </div>
+        {/* Info Boxes - Always shown for push/commit */}
+        {(isPush || activity.type === ACTIVITY_TYPES.COMMIT) && (
+          <div className="flex items-center gap-3 flex-wrap mb-4">
+            {/* Commit SHA */}
+            {displaySha && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                <Hash className="w-4 h-4 text-emerald-400" />
+                <code className="text-sm font-mono text-emerald-400 font-semibold">
+                  {displaySha.substring(0, 7)}
+                </code>
+              </div>
+            )}
             
             {/* Branch */}
             {activity.branch && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-lg">
-                <GitBranch className="w-3.5 h-3.5 text-teal-400" />
-                <span className="text-sm text-teal-400">{activity.branch}</span>
+              <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-xl">
+                <GitBranch className="w-4 h-4 text-teal-400" />
+                <span className="text-sm text-teal-400 font-medium">{activity.branch}</span>
               </div>
             )}
             
             {/* Lines Changed */}
-            {(additions !== undefined || deletions !== undefined) && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-void-700/50 border border-void-600/30 rounded-lg">
-                <Code2 className="w-3.5 h-3.5 text-frost-300/50" />
-                {additions > 0 && <span className="text-sm text-emerald-400">+{additions}</span>}
-                {deletions > 0 && <span className="text-sm text-red-400">-{deletions}</span>}
+            {(additions !== undefined || deletions !== undefined) ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-void-700/60 border border-void-600/40 rounded-xl">
+                <Code2 className="w-4 h-4 text-frost-300/60" />
+                <span className="text-sm font-semibold text-emerald-400">+{additions || 0}</span>
+                <span className="text-sm font-semibold text-red-400">-{deletions || 0}</span>
               </div>
-            )}
+            ) : loadingDetails ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-void-700/60 border border-void-600/40 rounded-xl">
+                <Loader2 className="w-4 h-4 text-frost-300/40 animate-spin" />
+                <span className="text-sm text-frost-300/40">Loading...</span>
+              </div>
+            ) : null}
             
             {/* Files */}
-            {files > 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                <FolderOpen className="w-3.5 h-3.5 text-purple-400" />
-                <span className="text-sm text-purple-400">{files} files</span>
+            {changedFiles > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-xl">
+                <FolderOpen className="w-4 h-4 text-purple-400" />
+                <span className="text-sm text-purple-400 font-medium">{changedFiles} files</span>
               </div>
-            )}
-            
-            {/* Load Details Button */}
-            {!commitDetails && token && (
-              <button
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadCommitDetails() }}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-frost-300/40 hover:text-frost-200 transition-colors"
-              >
-                {loadingDetails ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                {loadingDetails ? 'Loading...' : 'Load details'}
-              </button>
             )}
           </div>
         )}
         
-        {/* Multiple Commits Dropdown */}
+        {/* PR Info */}
+        {isPR && (additions !== undefined || deletions !== undefined || changedFiles > 0) && (
+          <div className="flex items-center gap-3 flex-wrap mb-4">
+            {(additions !== undefined || deletions !== undefined) && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-void-700/60 border border-void-600/40 rounded-xl">
+                <Code2 className="w-4 h-4 text-frost-300/60" />
+                <span className="text-sm font-semibold text-emerald-400">+{additions || 0}</span>
+                <span className="text-sm font-semibold text-red-400">-{deletions || 0}</span>
+              </div>
+            )}
+            {changedFiles > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-xl">
+                <FolderOpen className="w-4 h-4 text-purple-400" />
+                <span className="text-sm text-purple-400 font-medium">{changedFiles} files</span>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Multiple Commits */}
         {hasMultipleCommits && (
-          <div className="mt-2">
+          <div className="mb-4">
             <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMoreCommits(!showMoreCommits) }}
-              className="flex items-center gap-2 text-sm text-amber-400 hover:text-amber-300"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCommits(!showCommits) }}
+              className="flex items-center gap-2 text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors"
             >
               <Layers className="w-4 h-4" />
-              {commits.length || activity.commitCount} commits
-              {showMoreCommits ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {commits.length} commits
+              {showCommits ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
             
-            {showMoreCommits && commits.length > 0 && (
-              <div className="mt-2 space-y-1 pl-2 border-l-2 border-emerald-500/30">
+            {showCommits && (
+              <div className="mt-3 space-y-2 pl-3 border-l-2 border-emerald-500/30">
                 {commits.map((c, i) => (
                   <a
                     key={c.sha || i}
@@ -333,11 +376,11 @@ function ActivityCard({ activity, onMemberClick, token }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-2 py-1.5 px-2 hover:bg-void-700/50 rounded-lg group/commit"
+                    className="flex items-center gap-2 py-2 px-3 hover:bg-void-700/50 rounded-lg group/commit transition-colors"
                   >
-                    <GitCommit className="w-3 h-3 text-emerald-400" />
+                    <GitCommit className="w-3.5 h-3.5 text-emerald-400" />
                     <code className="text-xs text-emerald-400 font-mono">{c.sha?.substring(0, 7)}</code>
-                    <span className="text-xs text-frost-300/70 truncate flex-1">{c.message?.split('\n')[0]}</span>
+                    <span className="text-sm text-frost-300/70 truncate flex-1">{c.message?.split('\n')[0]}</span>
                     <ExternalLink className="w-3 h-3 text-frost-300/20 group-hover/commit:text-emerald-400" />
                   </a>
                 ))}
@@ -346,49 +389,32 @@ function ActivityCard({ activity, onMemberClick, token }) {
           </div>
         )}
         
-        {/* PR Info (lines/files) */}
-        {isPR && (additions !== undefined || deletions !== undefined) && (
-          <div className="flex items-center gap-3 flex-wrap">
-            {additions > 0 && (
-              <span className="flex items-center gap-1 text-sm text-emerald-400">
-                <Plus className="w-3.5 h-3.5" />{additions}
-              </span>
-            )}
-            {deletions > 0 && (
-              <span className="flex items-center gap-1 text-sm text-red-400">
-                <Minus className="w-3.5 h-3.5" />{deletions}
-              </span>
-            )}
-            {files > 0 && (
-              <span className="text-sm text-frost-300/50">{files} files changed</span>
-            )}
+        {/* Body Preview */}
+        {activity.body && (
+          <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+            <p className="text-sm text-frost-300/70 italic line-clamp-2">
+              "{activity.body.slice(0, 200)}{activity.body.length > 200 ? '...' : ''}"
+            </p>
           </div>
         )}
         
-        {/* Body Preview */}
-        {activity.body && (
-          <p className="mt-2 text-sm text-frost-300/60 italic line-clamp-2 bg-void-700/30 px-3 py-2 rounded-lg">
-            "{activity.body.slice(0, 200)}{activity.body.length > 200 ? '...' : ''}"
-          </p>
-        )}
-        
-        {/* Branch Info */}
+        {/* Branch Created */}
         {activity.type === ACTIVITY_TYPES.BRANCH_CREATED && activity.branch && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-lg w-fit">
+          <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-xl w-fit">
             <GitBranch className="w-4 h-4 text-teal-400" />
             <span className="text-sm text-teal-400 font-medium">{activity.branch}</span>
           </div>
         )}
         
-        {/* Tag Info */}
+        {/* Tag */}
         {activity.tagName && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg w-fit">
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl w-fit">
             <Tag className="w-4 h-4 text-amber-400" />
             <span className="text-sm text-amber-400 font-medium">{activity.tagName}</span>
           </div>
         )}
-      </div>
-    </a>
+      </a>
+    </div>
   )
 }
 
@@ -421,7 +447,7 @@ export function ActivityFeed({
   
   const displayCount = showAll ? filteredActivities.length : Math.min(filteredActivities.length, 50)
   
-  // Fullscreen view
+  // Fullscreen
   if (isFullscreen) {
     return (
       <div className="fixed inset-0 z-[100] bg-void-900/98 backdrop-blur-xl overflow-hidden flex flex-col">
@@ -459,7 +485,7 @@ export function ActivityFeed({
         </div>
         
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-5xl mx-auto space-y-3">
+          <div className="max-w-5xl mx-auto space-y-4">
             {filteredActivities.map((activity, i) => (
               <ActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} token={token} />
             ))}
@@ -485,7 +511,9 @@ export function ActivityFeed({
           </div>
           <h3 className="text-frost-100 font-bold text-lg">{title}</h3>
           {showCount && (
-            <span className="text-sm px-3 py-1 bg-void-600/50 rounded-full text-frost-300/60 font-medium">{filteredActivities.length}</span>
+            <span className="text-sm px-3 py-1 bg-void-600/50 rounded-full text-frost-300/60 font-medium">
+              {filteredActivities.length}
+            </span>
           )}
         </div>
         
@@ -509,7 +537,7 @@ export function ActivityFeed({
         </div>
       </div>
       
-      <div className="p-4 space-y-3 overflow-y-auto" style={{ maxHeight }}>
+      <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight }}>
         {filteredActivities.slice(0, displayCount).map((activity, i) => (
           <ActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} token={token} />
         ))}
