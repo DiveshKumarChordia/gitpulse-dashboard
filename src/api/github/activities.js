@@ -229,6 +229,76 @@ async function fetchWithAuth(url, token) {
   return response.json()
 }
 
+// ============ FETCH COMMIT DETAILS ============
+export async function fetchCommitDetails(token, org, repo, sha) {
+  try {
+    const data = await fetchWithAuth(
+      `${GITHUB_API_BASE}/repos/${org}/${repo}/commits/${sha}`,
+      token
+    )
+    if (!data) return null
+    
+    return {
+      sha: data.sha,
+      shortSha: data.sha?.substring(0, 7),
+      message: data.commit?.message?.split('\n')[0],
+      fullMessage: data.commit?.message,
+      author: data.author?.login || data.commit?.author?.name,
+      authorEmail: data.commit?.author?.email,
+      avatarUrl: data.author?.avatar_url,
+      date: data.commit?.committer?.date,
+      url: data.html_url,
+      additions: data.stats?.additions,
+      deletions: data.stats?.deletions,
+      changedFiles: data.files?.length || 0,
+      files: data.files?.map(f => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+        changes: f.changes,
+      })),
+    }
+  } catch (e) {
+    console.warn('Failed to fetch commit details:', e)
+    return null
+  }
+}
+
+// ============ FETCH PUSH COMMITS (from compare or branch) ============
+export async function fetchPushCommits(token, org, repo, beforeSha, afterSha) {
+  try {
+    // If before is all zeros, this is a new branch - fetch branch commits instead
+    if (!beforeSha || beforeSha === '0000000000000000000000000000000000000000') {
+      // Just fetch the single commit
+      const commit = await fetchCommitDetails(token, org, repo, afterSha)
+      return commit ? [commit] : []
+    }
+    
+    // Use compare API
+    const data = await fetchWithAuth(
+      `${GITHUB_API_BASE}/repos/${org}/${repo}/compare/${beforeSha}...${afterSha}`,
+      token
+    )
+    
+    if (!data || !data.commits) return []
+    
+    return data.commits.map(c => ({
+      sha: c.sha,
+      shortSha: c.sha?.substring(0, 7),
+      message: c.commit?.message?.split('\n')[0],
+      fullMessage: c.commit?.message,
+      author: c.author?.login || c.commit?.author?.name,
+      avatarUrl: c.author?.avatar_url,
+      date: c.commit?.committer?.date,
+      url: c.html_url,
+    }))
+  } catch (e) {
+    console.warn('Failed to fetch push commits:', e)
+    return []
+  }
+}
+
 // ============ FETCH REPO EVENTS (Most comprehensive) ============
 export async function fetchRepoEvents(token, org, repoName) {
   const activities = []
@@ -338,30 +408,48 @@ function parseGitHubEvent(event, org, repoName) {
       const pushBranch = payload.ref?.replace('refs/heads/', '')
       const pushCommits = payload.commits || []
       const firstCommit = pushCommits[0]
+      const pushSize = payload.size || pushCommits.length || 0
+      const headSha = payload.head
+      const beforeSha = payload.before
+      
       // Build proper message: show first commit message or fallback
-      const pushMessage = firstCommit?.message?.split('\n')[0] || 
-        (pushCommits.length > 0 ? `${pushCommits.length} commit${pushCommits.length > 1 ? 's' : ''} to ${pushBranch}` : `Push to ${pushBranch}`)
-      // Build proper URL: link to first commit or compare view
-      const pushUrl = pushCommits.length === 1 && firstCommit?.sha
-        ? `https://github.com/${org}/${repoName}/commit/${firstCommit.sha}`
-        : pushCommits.length > 1 && payload.before && payload.head
-          ? `https://github.com/${org}/${repoName}/compare/${payload.before?.substring(0, 7)}...${payload.head?.substring(0, 7)}`
-          : `https://github.com/${org}/${repoName}/tree/${pushBranch}`
+      let pushMessage = `Push to ${pushBranch}`
+      if (firstCommit?.message) {
+        pushMessage = firstCommit.message.split('\n')[0]
+      } else if (pushSize > 0) {
+        pushMessage = `${pushSize} commit${pushSize > 1 ? 's' : ''} to ${pushBranch}`
+      }
+      
+      // Build proper URL
+      let pushUrl = `https://github.com/${org}/${repoName}/tree/${pushBranch}`
+      if (headSha) {
+        pushUrl = `https://github.com/${org}/${repoName}/commit/${headSha}`
+      }
+      if (pushSize > 1 && beforeSha && headSha && beforeSha !== '0000000000000000000000000000000000000000') {
+        pushUrl = `https://github.com/${org}/${repoName}/compare/${beforeSha.substring(0, 7)}...${headSha.substring(0, 7)}`
+      }
       
       return {
         ...base,
         type: ACTIVITY_TYPES.PUSH,
         message: pushMessage,
-        fullMessage: pushCommits.length > 1 ? `${pushCommits.length} commits to ${pushBranch}` : null,
+        fullMessage: pushSize > 1 ? `${pushSize} commits to ${pushBranch}` : null,
         branch: pushBranch,
         url: pushUrl,
-        shortSha: firstCommit?.sha?.substring(0, 7),
+        sha: headSha,
+        shortSha: headSha?.substring(0, 7),
+        beforeSha: beforeSha,
         commits: pushCommits.map(c => ({
           sha: c.sha,
+          shortSha: c.sha?.substring(0, 7),
           message: c.message,
+          author: c.author?.name || c.author?.email,
           url: `https://github.com/${org}/${repoName}/commit/${c.sha}`,
         })),
-        commitCount: pushCommits.length,
+        commitCount: pushSize,
+        // Store ref info for fetching more details
+        ref: payload.ref,
+        distinctSize: payload.distinct_size,
       }
       
     case 'PullRequestEvent':

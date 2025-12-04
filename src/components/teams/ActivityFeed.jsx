@@ -7,12 +7,12 @@ import { useState, useMemo } from 'react'
 import { 
   GitCommit, GitPullRequest, GitMerge, MessageSquare, Eye, ExternalLink,
   CheckCircle, XCircle, AlertCircle, GitBranch, Tag, Rocket, Clock,
-  MessageCircle, Trash2, RefreshCw, Upload, GitFork, Activity,
+  MessageCircle, Trash2, Upload, GitFork, Activity, Loader2,
   Maximize2, Minimize2, ChevronDown, ChevronUp, Search, Plus, Minus, 
   FileCode, ArrowUpRight, Code2, FolderOpen, Hash, Layers
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { ACTIVITY_TYPES } from '../../api/github/activities'
+import { ACTIVITY_TYPES, fetchPushCommits, fetchCommitDetails } from '../../api/github/activities'
 
 // ============ ACTIVITY TYPE STYLES ============
 const ACTIVITY_STYLES = {
@@ -158,60 +158,21 @@ const ICONS = {
   [ACTIVITY_TYPES.RELEASE_PUBLISHED]: Rocket,
 }
 
-// ============ COMMIT DETAILS SECTION ============
-function CommitDetails({ commits, repo, expanded, onToggle }) {
-  if (!commits || commits.length === 0) return null
-  
-  return (
-    <div className="mt-4">
-      <button 
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle() }}
-        className="flex items-center gap-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
-      >
-        <Layers className="w-4 h-4" />
-        {commits.length} commit{commits.length > 1 ? 's' : ''}
-        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-      </button>
-      
-      {expanded && (
-        <div className="mt-3 space-y-2 animate-fadeIn">
-          {commits.map((commit, i) => (
-            <a
-              key={commit.sha || i}
-              href={commit.url || `https://github.com/${repo}/commit/${commit.sha}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-start gap-3 p-3 bg-void-900/60 hover:bg-void-800/60 border border-void-600/30 hover:border-emerald-500/30 rounded-xl transition-all group/commit"
-            >
-              <GitCommit className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <code className="text-xs font-mono text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded">
-                    {commit.sha?.substring(0, 7)}
-                  </code>
-                  <ExternalLink className="w-3 h-3 text-frost-300/30 group-hover/commit:text-emerald-400 transition-colors" />
-                </div>
-                <p className="text-sm text-frost-200 group-hover/commit:text-white transition-colors line-clamp-2">
-                  {commit.message?.split('\n')[0]}
-                </p>
-              </div>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ============ ENHANCED ACTIVITY CARD ============
-function EnhancedActivityCard({ activity, onMemberClick }) {
+function EnhancedActivityCard({ activity, onMemberClick, token, org }) {
   const [showCommits, setShowCommits] = useState(false)
-  const [showFiles, setShowFiles] = useState(false)
+  const [loadedCommits, setLoadedCommits] = useState(null)
+  const [loadingCommits, setLoadingCommits] = useState(false)
+  const [commitDetails, setCommitDetails] = useState(null)
   
   const style = ACTIVITY_STYLES[activity.type] || DEFAULT_STYLE
   const Icon = ICONS[activity.type] || Activity
   const label = ACTIVITY_LABELS[activity.type] || 'Activity'
+  
+  // Get commits from activity or loaded
+  const commits = loadedCommits || activity.commits || []
+  const hasCommits = commits.length > 0 || activity.commitCount > 0
+  const hasMultipleCommits = commits.length > 1 || (activity.commitCount && activity.commitCount > 1)
   
   const handleAuthorClick = (e) => {
     e.preventDefault()
@@ -219,30 +180,71 @@ function EnhancedActivityCard({ activity, onMemberClick }) {
     onMemberClick?.(activity.author)
   }
   
+  // Load commit details when expanded
+  const handleToggleCommits = async () => {
+    if (!showCommits && !loadedCommits && token && activity.type === ACTIVITY_TYPES.PUSH) {
+      setLoadingCommits(true)
+      try {
+        // If we have sha info, fetch the commits
+        if (activity.sha && activity.beforeSha) {
+          const fetchedCommits = await fetchPushCommits(
+            token, 
+            org || activity.repo?.split('/')[0], 
+            activity.repo?.includes('/') ? activity.repo.split('/')[1] : activity.repo, 
+            activity.beforeSha, 
+            activity.sha
+          )
+          if (fetchedCommits.length > 0) {
+            setLoadedCommits(fetchedCommits)
+          }
+        } else if (activity.sha) {
+          // Just fetch the single commit
+          const commit = await fetchCommitDetails(
+            token,
+            org || activity.repo?.split('/')[0],
+            activity.repo?.includes('/') ? activity.repo.split('/')[1] : activity.repo,
+            activity.sha
+          )
+          if (commit) {
+            setCommitDetails(commit)
+            setLoadedCommits([commit])
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load commits:', e)
+      }
+      setLoadingCommits(false)
+    }
+    setShowCommits(!showCommits)
+  }
+  
   // Get the main URL
   const getMainUrl = () => {
     if (activity.url) return activity.url
-    if (activity.type === ACTIVITY_TYPES.PUSH && activity.commits?.[0]?.sha) {
-      return `https://github.com/${activity.repo}/commit/${activity.commits[0].sha}`
-    }
     if (activity.sha) {
       return `https://github.com/${activity.repo}/commit/${activity.sha}`
+    }
+    if (activity.type === ACTIVITY_TYPES.PUSH && commits[0]?.sha) {
+      return `https://github.com/${activity.repo}/commit/${commits[0].sha}`
     }
     return `https://github.com/${activity.repo}`
   }
   
   // Get display message
   const getMessage = () => {
-    if (activity.type === ACTIVITY_TYPES.PUSH && activity.commits?.length > 0) {
-      return activity.commits[0]?.message?.split('\n')[0] || activity.message
+    if (activity.type === ACTIVITY_TYPES.PUSH && commits.length > 0 && commits[0]?.message) {
+      return commits[0].message.split('\n')[0]
     }
     return activity.message
   }
   
   const mainUrl = getMainUrl()
   const displayMessage = getMessage()
-  const hasCommits = activity.commits && activity.commits.length > 0
-  const hasMultipleCommits = activity.commits && activity.commits.length > 1
+  
+  // Get stats from loaded commit details
+  const additions = commitDetails?.additions ?? activity.additions
+  const deletions = commitDetails?.deletions ?? activity.deletions
+  const changedFiles = commitDetails?.changedFiles ?? activity.changedFiles
   
   return (
     <div className={`group relative rounded-2xl overflow-hidden border-l-4 ${style.border} bg-void-800/70 hover:bg-void-800/90 transition-all duration-200`}>
@@ -315,16 +317,22 @@ function EnhancedActivityCard({ activity, onMemberClick }) {
         {/* Info Grid - Multi-colored sections */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           {/* Commit ID */}
-          {(activity.shortSha || activity.commits?.[0]?.sha) && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+          {(activity.shortSha || commits[0]?.sha) && (
+            <a 
+              href={`https://github.com/${activity.repo}/commit/${activity.sha || commits[0]?.sha}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-colors"
+            >
               <div className="flex items-center gap-2 mb-1">
                 <Hash className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-xs text-emerald-400/70 uppercase font-medium">Commit ID</span>
               </div>
               <code className="text-sm font-mono text-emerald-400 font-semibold">
-                {activity.shortSha || activity.commits?.[0]?.sha?.substring(0, 7)}
+                {activity.shortSha || commits[0]?.shortSha || commits[0]?.sha?.substring(0, 7)}
               </code>
-            </div>
+            </a>
           )}
           
           {/* Branch */}
@@ -345,21 +353,21 @@ function EnhancedActivityCard({ activity, onMemberClick }) {
           )}
           
           {/* Lines Changed */}
-          {(activity.additions !== undefined || activity.deletions !== undefined) && (
+          {(additions !== undefined || deletions !== undefined) && (
             <div className="p-3 bg-void-700/50 border border-void-600/30 rounded-xl">
               <div className="flex items-center gap-2 mb-1">
                 <Code2 className="w-3.5 h-3.5 text-frost-300/60" />
                 <span className="text-xs text-frost-300/50 uppercase font-medium">Lines Changed</span>
               </div>
               <div className="flex items-center gap-3">
-                {activity.additions !== undefined && (
+                {additions !== undefined && additions > 0 && (
                   <span className="flex items-center gap-1 text-sm font-bold text-emerald-400">
-                    <Plus className="w-3.5 h-3.5" />{activity.additions}
+                    <Plus className="w-3.5 h-3.5" />{additions}
                   </span>
                 )}
-                {activity.deletions !== undefined && (
+                {deletions !== undefined && deletions > 0 && (
                   <span className="flex items-center gap-1 text-sm font-bold text-red-400">
-                    <Minus className="w-3.5 h-3.5" />{activity.deletions}
+                    <Minus className="w-3.5 h-3.5" />{deletions}
                   </span>
                 )}
               </div>
@@ -367,24 +375,24 @@ function EnhancedActivityCard({ activity, onMemberClick }) {
           )}
           
           {/* Files Changed */}
-          {activity.changedFiles !== undefined && activity.changedFiles > 0 && (
+          {changedFiles !== undefined && changedFiles > 0 && (
             <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl">
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpen className="w-3.5 h-3.5 text-purple-400" />
                 <span className="text-xs text-purple-400/70 uppercase font-medium">Files</span>
               </div>
-              <p className="text-sm text-purple-400 font-semibold">{activity.changedFiles} files</p>
+              <p className="text-sm text-purple-400 font-semibold">{changedFiles} files</p>
             </div>
           )}
           
           {/* Commit Count (for push with multiple commits) */}
-          {hasMultipleCommits && (
+          {(hasMultipleCommits || activity.commitCount > 1) && (
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
               <div className="flex items-center gap-2 mb-1">
                 <Layers className="w-3.5 h-3.5 text-amber-400" />
                 <span className="text-xs text-amber-400/70 uppercase font-medium">Commits</span>
               </div>
-              <p className="text-sm text-amber-400 font-semibold">{activity.commits.length} commits</p>
+              <p className="text-sm text-amber-400 font-semibold">{commits.length || activity.commitCount} commits</p>
             </div>
           )}
         </div>
@@ -436,14 +444,73 @@ function EnhancedActivityCard({ activity, onMemberClick }) {
       </a>
       
       {/* Commits Section - Outside the link */}
-      {hasCommits && (
+      {(hasCommits || activity.sha) && (
         <div className="px-5 pb-5 -mt-2">
-          <CommitDetails 
-            commits={activity.commits}
-            repo={activity.repo}
-            expanded={showCommits}
-            onToggle={() => setShowCommits(!showCommits)}
-          />
+          <div className="mt-4">
+            <button 
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleToggleCommits() }}
+              className="flex items-center gap-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              {loadingCommits ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Layers className="w-4 h-4" />
+              )}
+              {loadingCommits ? 'Loading commits...' : `${commits.length || activity.commitCount || 1} commit${(commits.length || activity.commitCount || 1) > 1 ? 's' : ''}`}
+              {!loadingCommits && (showCommits ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
+            </button>
+            
+            {showCommits && commits.length > 0 && (
+              <div className="mt-3 space-y-2 animate-fadeIn">
+                {commits.map((commit, i) => (
+                  <a
+                    key={commit.sha || i}
+                    href={commit.url || `https://github.com/${activity.repo}/commit/${commit.sha}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-start gap-3 p-3 bg-void-900/60 hover:bg-void-800/60 border border-void-600/30 hover:border-emerald-500/30 rounded-xl transition-all group/commit"
+                  >
+                    <GitCommit className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <code className="text-xs font-mono text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded">
+                          {commit.shortSha || commit.sha?.substring(0, 7)}
+                        </code>
+                        {commit.author && (
+                          <span className="text-xs text-frost-300/50">{commit.author}</span>
+                        )}
+                        <ExternalLink className="w-3 h-3 text-frost-300/30 group-hover/commit:text-emerald-400 transition-colors" />
+                      </div>
+                      <p className="text-sm text-frost-200 group-hover/commit:text-white transition-colors line-clamp-2">
+                        {commit.message}
+                      </p>
+                      {/* Show file stats if available */}
+                      {(commit.additions !== undefined || commit.deletions !== undefined) && (
+                        <div className="flex items-center gap-3 mt-2 text-xs">
+                          {commit.additions !== undefined && (
+                            <span className="text-emerald-400">+{commit.additions}</span>
+                          )}
+                          {commit.deletions !== undefined && (
+                            <span className="text-red-400">-{commit.deletions}</span>
+                          )}
+                          {commit.changedFiles !== undefined && (
+                            <span className="text-frost-300/50">{commit.changedFiles} files</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+            
+            {showCommits && commits.length === 0 && !loadingCommits && (
+              <p className="mt-3 text-sm text-frost-300/50 italic">
+                No commit details available. <a href={mainUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">View on GitHub →</a>
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -458,6 +525,8 @@ export function ActivityFeed({
   maxHeight = '800px',
   showCount = true,
   searchable = true,
+  token,
+  org,
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -517,7 +586,7 @@ export function ActivityFeed({
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-5xl mx-auto space-y-4">
             {filteredActivities.map((activity, i) => (
-              <EnhancedActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} />
+              <EnhancedActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} token={token} org={org} />
             ))}
             
             {filteredActivities.length === 0 && (
@@ -567,7 +636,7 @@ export function ActivityFeed({
       
       <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight }}>
         {filteredActivities.slice(0, displayCount).map((activity, i) => (
-          <EnhancedActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} />
+          <EnhancedActivityCard key={activity.id || i} activity={activity} onMemberClick={onMemberClick} token={token} org={org} />
         ))}
         
         {filteredActivities.length === 0 && (

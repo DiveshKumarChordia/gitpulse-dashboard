@@ -421,6 +421,8 @@ export function TeamReposSection({ token, org, repos, onMemberClick }) {
             onMemberClick={onMemberClick}
             maxHeight="800px"
             searchable
+            token={token}
+            org={org}
           />
         </div>
         

@@ -511,6 +511,8 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
             onMemberClick={onMemberClick}
             maxHeight="800px"
             searchable
+            token={token}
+            org={org}
           />
         </div>
         
