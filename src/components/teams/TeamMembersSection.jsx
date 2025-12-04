@@ -234,18 +234,7 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
   const [dateRange, setDateRange] = useState({ start: null, end: null })
   const toast = useToast()
   
-  // Check if repo belongs to org - simple org prefix check
-  const isOrgRepo = (repoName) => {
-    if (!repoName) return false
-    // repo is now full name like "org/repo-name"
-    if (repoName.includes('/')) {
-      const [repoOrg] = repoName.split('/')
-      return repoOrg.toLowerCase() === org.toLowerCase()
-    }
-    return false
-  }
-  
-  // Get unique org repos from activities
+  // Get unique repos from activities
   const availableRepos = useMemo(() => {
     const repoSet = new Set()
     activities.forEach(a => {
@@ -279,14 +268,14 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
           }
         })
         
-        // PARALLEL: Load all members at once (up to 10 concurrent)
-        const BATCH_SIZE = 10
+        // PARALLEL: Load all members at once (up to 5 concurrent for stability)
+        const BATCH_SIZE = 5
         let completed = 0
         
         for (let i = 0; i < members.length; i += BATCH_SIZE) {
           const batch = members.slice(i, i + BATCH_SIZE)
           setProgress({
-            status: `Loading ${batch.length} members in parallel...`,
+            status: `Loading ${batch.map(m => m.login).join(', ')}...`,
             percentage: Math.round((i / members.length) * 100)
           })
           
@@ -307,26 +296,24 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
               const { member, activities: memberActivities } = result.value
               completed++
               
-              // Filter and add activities from ORG REPOS only
+              // Add ALL activities (no org filtering)
               for (const act of memberActivities) {
-                if (isOrgRepo(act.repo)) {
-                  allActs.push(act)
+                allActs.push(act)
+                
+                const s = memberStatsMap[member.login]
+                if (s && act.repo) {
+                  s.reposActive.add(act.repo)
                   
-                  const s = memberStatsMap[member.login]
-                  if (s) {
-                    s.reposActive.add(act.repo)
-                    
-                    if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
-                      s.commits += act.commitCount || 1
-                    } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
-                      s.prs++
-                    } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
-                      s.merges++
-                    } else if (act.type?.includes('review')) {
-                      s.reviews++
-                    } else if (act.type?.includes('comment')) {
-                      s.comments++
-                    }
+                  if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+                    s.commits += act.commitCount || 1
+                  } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+                    s.prs++
+                  } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+                    s.merges++
+                  } else if (act.type?.includes('review')) {
+                    s.reviews++
+                  } else if (act.type?.includes('comment')) {
+                    s.comments++
                   }
                 }
               }
@@ -360,9 +347,9 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
         setStats(finalStats)
         
         if (unique.length > 0) {
-          toast.success(`Loaded ${unique.length} org activities from ${members.length} members`)
+          toast.success(`Loaded ${unique.length} activities from ${members.length} members`)
         } else {
-          toast.warning(`No org activities found (checked ${members.length} members)`)
+          toast.warning(`No activities found (checked ${members.length} members)`)
         }
       } catch (e) {
         console.error('TeamMembersSection error:', e)
@@ -374,7 +361,7 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
     }
     
     load()
-  }, [token, org, members, repos])
+  }, [token, org, members])
   
   // Apply all filters
   const filteredActivities = useMemo(() => {
@@ -471,7 +458,7 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
       {/* Info Header */}
       <div className="flex items-center gap-3 p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
         <UserCheck className="w-5 h-5 text-purple-400" />
-        <span className="text-purple-400 font-medium">Team member activities in organization repos only</span>
+        <span className="text-purple-400 font-medium">All activities from {members.length} team members</span>
         <span className="text-frost-300/50 text-sm">• {activities.length} activities</span>
       </div>
       
