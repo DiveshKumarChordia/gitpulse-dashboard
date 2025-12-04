@@ -234,100 +234,158 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
   const [dateRange, setDateRange] = useState({ start: null, end: null })
   const toast = useToast()
   
-  // Get org repo names for filtering
-  const orgRepoNames = useMemo(() => {
-    return new Set(repos.map(r => r.name))
-  }, [repos])
+  // Get org repo names for filtering - BOTH full name and short name
+  const orgRepoInfo = useMemo(() => {
+    const fullNames = new Set()
+    const shortNames = new Set()
+    repos.forEach(r => {
+      fullNames.add(r.full_name || `${org}/${r.name}`)
+      shortNames.add(r.name)
+    })
+    return { fullNames, shortNames, org }
+  }, [repos, org])
+  
+  // Check if repo belongs to org
+  const isOrgRepo = (repoName) => {
+    if (!repoName) return false
+    // Check full name match
+    if (orgRepoInfo.fullNames.has(repoName)) return true
+    // Check short name match
+    if (orgRepoInfo.shortNames.has(repoName)) return true
+    // Check if starts with org/
+    if (repoName.startsWith(`${org}/`)) {
+      const shortName = repoName.split('/')[1]
+      if (orgRepoInfo.shortNames.has(shortName)) return true
+    }
+    // Check if org prefix matches
+    if (repoName.includes('/')) {
+      const [repoOrg] = repoName.split('/')
+      return repoOrg.toLowerCase() === org.toLowerCase()
+    }
+    return false
+  }
   
   // Get unique org repos from activities
   const availableRepos = useMemo(() => {
     const repoSet = new Set()
     activities.forEach(a => {
-      if (a.repo && orgRepoNames.has(a.repo)) {
+      if (a.repo) {
         repoSet.add(a.repo)
       }
     })
     return Array.from(repoSet).sort()
-  }, [activities, orgRepoNames])
+  }, [activities])
   
   useEffect(() => {
     const load = async () => {
-      if (!members.length) return
+      if (!members.length) {
+        setLoading(false)
+        return
+      }
       setLoading(true)
       
       try {
         const allActs = []
         const memberStatsMap = {}
         
-        const BATCH_SIZE = 3
+        // Initialize all members first
+        members.forEach(member => {
+          memberStatsMap[member.login] = {
+            login: member.login,
+            avatarUrl: member.avatar_url || member.avatarUrl,
+            commits: 0, prs: 0, merges: 0, reviews: 0, comments: 0,
+            reposActive: new Set(),
+            total: 0,
+          }
+        })
+        
+        // PARALLEL: Load all members at once (up to 10 concurrent)
+        const BATCH_SIZE = 10
+        let completed = 0
+        
         for (let i = 0; i < members.length; i += BATCH_SIZE) {
           const batch = members.slice(i, i + BATCH_SIZE)
           setProgress({
-            status: `Loading ${batch.map(m => m.login).join(', ')}...`,
+            status: `Loading ${batch.length} members in parallel...`,
             percentage: Math.round((i / members.length) * 100)
           })
           
-          const results = await Promise.all(
+          const results = await Promise.allSettled(
             batch.map(async (member) => {
-              const memberActivities = await fetchUserEvents(token, member.login)
-              return { member, activities: memberActivities }
+              try {
+                const memberActivities = await fetchUserEvents(token, member.login)
+                return { member, activities: memberActivities || [] }
+              } catch (e) {
+                console.warn(`Failed to fetch activities for ${member.login}:`, e)
+                return { member, activities: [] }
+              }
             })
           )
           
-          for (const { member, activities: memberActivities } of results) {
-            if (!memberStatsMap[member.login]) {
-              memberStatsMap[member.login] = {
-                login: member.login,
-                avatarUrl: member.avatarUrl,
-                commits: 0, prs: 0, merges: 0, reviews: 0, comments: 0,
-                reposActive: new Set(),
-                total: 0,
-              }
-            }
-            
-            // ONLY include activities from ORG REPOS
-            for (const act of memberActivities) {
-              // Filter: only include if repo belongs to org
-              if (act.repo && orgRepoNames.has(act.repo)) {
-                allActs.push(act)
-                
-                const s = memberStatsMap[member.login]
-                s.reposActive.add(act.repo)
-                
-                if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
-                  s.commits += act.commitCount || 1
-                } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
-                  s.prs++
-                } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
-                  s.merges++
-                } else if (act.type?.includes('review')) {
-                  s.reviews++
-                } else if (act.type?.includes('comment')) {
-                  s.comments++
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
+              const { member, activities: memberActivities } = result.value
+              completed++
+              
+              // Filter and add activities from ORG REPOS only
+              for (const act of memberActivities) {
+                if (isOrgRepo(act.repo)) {
+                  allActs.push(act)
+                  
+                  const s = memberStatsMap[member.login]
+                  if (s) {
+                    s.reposActive.add(act.repo)
+                    
+                    if (act.type === ACTIVITY_TYPES.COMMIT || act.type === ACTIVITY_TYPES.PUSH) {
+                      s.commits += act.commitCount || 1
+                    } else if (act.type === ACTIVITY_TYPES.PR_OPENED) {
+                      s.prs++
+                    } else if (act.type === ACTIVITY_TYPES.PR_MERGED) {
+                      s.merges++
+                    } else if (act.type?.includes('review')) {
+                      s.reviews++
+                    } else if (act.type?.includes('comment')) {
+                      s.comments++
+                    }
+                  }
                 }
               }
             }
           }
+          
+          setProgress({
+            status: `Loaded ${completed}/${members.length} members...`,
+            percentage: Math.round((completed / members.length) * 100)
+          })
         }
         
+        // Sort and deduplicate
         allActs.sort((a, b) => new Date(b.date) - new Date(a.date))
         const seen = new Set()
         const unique = allActs.filter(a => {
-          if (seen.has(a.id)) return false
-          seen.add(a.id)
+          const key = a.id || `${a.type}-${a.repo}-${a.date}-${a.author}`
+          if (seen.has(key)) return false
+          seen.add(key)
           return true
         })
         
+        // Calculate final stats
         const finalStats = Object.values(memberStatsMap).map(s => ({
           ...s,
-          reposActive: s.reposActive.size,
-          total: s.commits + s.prs + s.merges + s.reviews + s.comments,
+          reposActive: s.reposActive instanceof Set ? s.reposActive.size : s.reposActive,
+          total: (s.commits || 0) + (s.prs || 0) + (s.merges || 0) + (s.reviews || 0) + (s.comments || 0),
         })).sort((a, b) => b.total - a.total)
         
         setActivities(unique)
         setStats(finalStats)
-        toast.success(`Loaded ${unique.length} org activities from ${members.length} members`)
+        
+        if (unique.length > 0) {
+          toast.success(`Loaded ${unique.length} org activities from ${members.length} members`)
+        } else {
+          toast.warning(`No org activities found (checked ${members.length} members)`)
+        }
       } catch (e) {
+        console.error('TeamMembersSection error:', e)
         toast.apiError(e.message)
       } finally {
         setLoading(false)
@@ -336,7 +394,7 @@ export function TeamMembersSection({ token, org, members, repos = [], onMemberCl
     }
     
     load()
-  }, [token, org, members, orgRepoNames])
+  }, [token, org, members, repos])
   
   // Apply all filters
   const filteredActivities = useMemo(() => {
